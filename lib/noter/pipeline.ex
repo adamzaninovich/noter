@@ -38,12 +38,14 @@ defmodule Noter.Pipeline do
 
       IO.puts("\nExtracting facts...")
 
-      extractions =
+      total = length(chunks)
+
+      extraction_result =
         chunks
         |> Task.async_stream(
           fn chunk ->
             IO.write(
-              "  chunk #{chunk.chunk_index}/#{length(chunks)} (#{chunk.range_start}–#{chunk.range_end})... "
+              "  chunk #{chunk.chunk_index}/#{total} (#{chunk.range_start}–#{chunk.range_end})... "
             )
 
             result = Extractor.extract(session_dir, context, chunk, opts)
@@ -54,15 +56,14 @@ defmodule Noter.Pipeline do
           timeout: :infinity,
           ordered: true
         )
-        |> Enum.map(fn {:ok, {chunk, result}} -> {chunk, result} end)
+        |> Enum.reduce_while({:ok, []}, fn
+          {:ok, {chunk, {:ok, facts}}}, {:ok, acc} -> {:cont, {:ok, [{chunk, facts} | acc]}}
+          {:ok, {_chunk, {:error, reason}}}, _ -> {:halt, {:error, "Extraction failed: #{inspect(reason)}"}}
+          {:exit, reason}, _ -> {:halt, {:error, "Task crashed: #{inspect(reason)}"}}
+        end)
 
-      failed = Enum.filter(extractions, fn {_, r} -> match?({:error, _}, r) end)
-
-      if failed != [] do
-        {:error, "Extraction failed for #{length(failed)} chunks"}
-      else
-        fact_pairs =
-          Enum.map(extractions, fn {chunk, {:ok, facts}} -> {chunk, facts} end)
+      with {:ok, fact_pairs_reversed} <- extraction_result do
+        fact_pairs = Enum.reverse(fact_pairs_reversed)
 
         IO.puts("\nAggregating facts...")
         facts = Aggregator.aggregate(fact_pairs)
@@ -89,7 +90,7 @@ defmodule Noter.Pipeline do
     case Session.find_previous_session(session_dir) do
       {:error, :no_previous_session} ->
         IO.puts("No previous session found — starting with empty context.")
-        Context.write(session_dir, "")
+        with :ok <- Context.write(session_dir, ""), do: {:ok, ""}
 
       {:ok, prev_dir} ->
         IO.puts("Using previous session: #{Path.basename(prev_dir)}")
@@ -100,17 +101,15 @@ defmodule Noter.Pipeline do
             _ -> ""
           end
 
-        prev_notes_path = Session.notes_path(prev_dir)
-
         prev_notes =
-          case File.read(prev_notes_path) do
+          case File.read(Session.notes_path(prev_dir)) do
             {:ok, n} -> n
             _ -> ""
           end
 
         if prev_context == "" and prev_notes == "" do
           IO.puts("Previous session has no context or notes — starting with empty context.")
-          Context.write(session_dir, "")
+          with :ok <- Context.write(session_dir, ""), do: {:ok, ""}
         else
           IO.puts("Generating campaign context from previous session...")
 
@@ -134,11 +133,6 @@ defmodule Noter.Pipeline do
       else
         IO.puts("No campaign-context.md found — generating from previous session...")
         generate_context(session_dir, opts)
-
-        case Context.read(session_dir) do
-          {:ok, ""} -> {:ok, ""}
-          result -> result
-        end
       end
     end
   end

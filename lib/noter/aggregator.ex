@@ -31,7 +31,7 @@ defmodule Noter.Aggregator do
               })
             end)
 
-          Map.update!(inner_acc, key, &(&1 ++ entries))
+          Map.update!(inner_acc, key, &(entries ++ &1))
         end)
       end)
 
@@ -75,11 +75,12 @@ defmodule Noter.Aggregator do
           if MapSet.member?(seen, key) do
             {result, seen}
           else
-            {result ++ [entry], MapSet.put(seen, key)}
+            {[entry | result], MapSet.put(seen, key)}
           end
       end
     end)
     |> elem(0)
+    |> Enum.reverse()
   end
 
   defp dedupe_named_categories(facts) do
@@ -98,25 +99,29 @@ defmodule Noter.Aggregator do
         name ->
           key = normalize(name)
           note = entry |> Map.get("notes", "") |> String.trim()
+          empty = %{"name" => String.trim(name), "notes" => [], "_notes_seen" => MapSet.new()}
 
-          Map.update(acc, key, %{"name" => String.trim(name), "notes" => [note]}, fn existing ->
-            existing_notes = Map.get(existing, "notes", [])
-
-            updated_notes =
-              if note != "" and normalize(note) not in Enum.map(existing_notes, &normalize/1) do
-                existing_notes ++ [note]
-              else
-                existing_notes
-              end
-
-            Map.put(existing, "notes", updated_notes)
-          end)
+          Map.update(acc, key, add_note(empty, note), &add_note(&1, note))
       end
     end)
     |> Map.values()
     |> Enum.map(fn entry ->
-      Map.update!(entry, "notes", &Enum.join(&1, "; "))
+      notes = entry |> Map.fetch!("notes") |> Enum.reverse() |> Enum.join("; ")
+      %{"name" => entry["name"], "notes" => notes}
     end)
+  end
+
+  defp add_note(entry, ""), do: entry
+
+  defp add_note(entry, note) do
+    key = normalize(note)
+    seen = Map.fetch!(entry, "_notes_seen")
+
+    if MapSet.member?(seen, key) do
+      entry
+    else
+      %{entry | "notes" => [note | entry["notes"]], "_notes_seen" => MapSet.put(seen, key)}
+    end
   end
 
   defp cross_category_dedupe(facts, primary_key, secondary_key) do

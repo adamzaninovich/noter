@@ -84,29 +84,26 @@ defmodule Mix.Tasks.Noter.Run do
 
     srt_path = Noter.Session.merged_srt_path(session_dir)
 
-    unless File.exists?(srt_path) do
-      IO.puts("No merged.srt found at #{srt_path}, skipping review.")
-      return()
-    end
+    if File.exists?(srt_path) do
+      {:ok, vocab} = Noter.Campaign.load_vocab(Path.join(session_dir, "tracks"))
+      {:ok, corrections} = Noter.Campaign.load_corrections(campaign_dir)
 
-    {:ok, vocab} = Noter.Campaign.load_vocab(Path.join(session_dir, "tracks"))
-    {:ok, corrections} = Noter.Campaign.load_corrections(campaign_dir)
+      unknown = Noter.Corrections.find_unknown_terms(srt_path, vocab, corrections)
 
-    unknown = Noter.Corrections.find_unknown_terms(srt_path, vocab, corrections)
+      if unknown == [] do
+        IO.puts("No unknown terms found.")
+      else
+        updated = Noter.Corrections.interactive_review(unknown, corrections)
 
-    if unknown == [] do
-      IO.puts("No unknown terms found.")
-    else
-      updated = Noter.Corrections.interactive_review(unknown, corrections)
-
-      if updated != corrections do
-        {:ok, _} = {:ok, :placeholder}
-
-        case Noter.Campaign.save_corrections(campaign_dir, updated) do
-          :ok -> IO.puts("Corrections saved.")
-          {:error, reason} -> IO.puts("Warning: could not save corrections: #{inspect(reason)}")
+        if updated != corrections do
+          case Noter.Campaign.save_corrections(campaign_dir, updated) do
+            :ok -> IO.puts("Corrections saved.")
+            {:error, reason} -> IO.puts("Warning: could not save corrections: #{inspect(reason)}")
+          end
         end
       end
+    else
+      IO.puts("No merged.srt found at #{srt_path}, skipping review.")
     end
   end
 
@@ -124,7 +121,4 @@ defmodule Mix.Tasks.Noter.Run do
 
   defp maybe_put(list, _key, nil), do: list
   defp maybe_put(list, key, value), do: Keyword.put(list, key, value)
-
-  # Needed because Elixir doesn't have early return — this is a no-op guard
-  defp return, do: nil
 end

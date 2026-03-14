@@ -133,6 +133,6 @@ defmodule Noter.Chunker do
     h = div(s, 3600)
     m = div(rem(s, 3600), 60)
     ss = rem(s, 60)
-    :io_lib.format("~2..0B:~2..0B:~2..0B", [h, m, ss]) |> IO.iodata_to_binary()
+    [h, m, ss] |> Enum.map_join(":", &String.pad_leading(Integer.to_string(&1), 2, "0"))
   end
 end

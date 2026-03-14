@@ -13,8 +13,7 @@ defmodule Noter.Corrections do
   def find_unknown_terms(srt_path, vocab, corrections) do
     known =
       (vocab ++ Map.keys(corrections) ++ Map.values(corrections))
-      |> Enum.map(&String.downcase/1)
-      |> MapSet.new()
+      |> MapSet.new(&String.downcase/1)
 
     srt_path
     |> File.read!()

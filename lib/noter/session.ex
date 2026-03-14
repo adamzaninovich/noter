@@ -114,7 +114,7 @@ defmodule Noter.Session do
       duration =
         case Map.get(data, "duration") do
           nil -> segments |> Enum.map(& &1.end) |> Enum.max(fn -> 0.0 end)
-          d -> d / 1
+          d -> d * 1.0
         end
 
       {:ok, %{segments: segments, duration: duration}}
