@@ -55,20 +55,18 @@ defmodule Noter.Prep do
   end
 
   defp clip_and_rename(flac_files, tracks_dir, players, start_ts, end_ts) do
-    results =
-      Enum.map(flac_files, fn path ->
-        basename = Path.basename(path, ".flac")
-        character_name = resolve_character(basename, players)
-        output_path = Path.join(tracks_dir, "#{character_name}.flac")
+    Enum.reduce_while(flac_files, :ok, fn path, :ok ->
+      basename = Path.basename(path, ".flac")
+      character_name = resolve_character(basename, players)
+      output_path = Path.join(tracks_dir, "#{character_name}.flac")
 
-        IO.puts("  #{Path.basename(path)} → #{character_name}.flac")
-        ffmpeg_clip(path, output_path, start_ts, end_ts)
-      end)
+      IO.puts("  #{Path.basename(path)} → #{character_name}.flac")
 
-    case Enum.find(results, &match?({:error, _}, &1)) do
-      nil -> :ok
-      err -> err
-    end
+      case ffmpeg_clip(path, output_path, start_ts, end_ts) do
+        :ok -> {:cont, :ok}
+        err -> {:halt, err}
+      end
+    end)
   end
 
   # Handles filenames like "2-indifferentpineapple.flac" → look up "indifferentpineapple"

@@ -17,31 +17,48 @@ defmodule Noter.LLM do
 
   Returns `{:ok, content_string}` or `{:error, reason}`.
   """
+  @max_retries 2
+  @initial_backoff_ms 1_000
+
   def chat(messages, opts \\ []) when is_list(messages) do
     model = Keyword.get(opts, :model, @default_model)
     api_key = api_key!()
 
     body =
       %{model: model, messages: messages}
-      |> maybe_put(:response_format, Keyword.get(opts, :response_format))
-      |> maybe_put(:reasoning_effort, Keyword.get(opts, :reasoning_effort))
+      |> put_present(:response_format, Keyword.get(opts, :response_format))
+      |> put_present(:reasoning_effort, Keyword.get(opts, :reasoning_effort))
 
+    request_with_retry(body, api_key, 0)
+  end
+
+  defp request_with_retry(body, api_key, attempt) do
     case Req.post("#{@base_url}/chat/completions",
            json: body,
            headers: [{"authorization", "Bearer #{api_key}"}],
            receive_timeout: 120_000
          ) do
-      {:ok, %{status: 200, body: body}} ->
+      {:ok, %{status: 200, body: resp_body}} ->
         content =
-          body
+          resp_body
           |> Map.fetch!("choices")
           |> hd()
           |> get_in(["message", "content"])
 
         {:ok, content}
 
-      {:ok, %{status: status, body: body}} ->
-        {:error, "OpenAI API error #{status}: #{inspect(body)}"}
+      {:ok, %{status: status}} when status in [429, 500, 502, 503] and attempt < @max_retries ->
+        backoff = @initial_backoff_ms * Integer.pow(2, attempt)
+        Process.sleep(backoff)
+        request_with_retry(body, api_key, attempt + 1)
+
+      {:ok, %{status: status, body: resp_body}} ->
+        {:error, "OpenAI API error #{status}: #{inspect(resp_body)}"}
+
+      {:error, _reason} when attempt < @max_retries ->
+        backoff = @initial_backoff_ms * Integer.pow(2, attempt)
+        Process.sleep(backoff)
+        request_with_retry(body, api_key, attempt + 1)
 
       {:error, reason} ->
         {:error, reason}
@@ -58,8 +75,8 @@ defmodule Noter.LLM do
     end
   end
 
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
 
   defp api_key! do
     System.get_env("OPENAI_API_KEY") ||

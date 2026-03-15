@@ -34,15 +34,7 @@ defmodule Noter.Extractor do
     ],
     "properties" => %{
       "range" => %{"type" => "string"},
-      "events" => %{
-        "type" => "array",
-        "items" => %{
-          "type" => "object",
-          "additionalProperties" => false,
-          "required" => ["text"],
-          "properties" => %{"text" => %{"type" => "string"}}
-        }
-      },
+      "events" => @text_array_schema,
       "locations" => %{
         "type" => "array",
         "items" => %{
@@ -79,21 +71,22 @@ defmodule Noter.Extractor do
   @doc """
   Extracts facts from a chunk, using the SQLite cache when available.
 
-  `session_path` is the absolute path to the session directory (used as cache key).
+  `session_path` is the path to the session directory (basename used as cache key).
   `context` is the campaign context string (may be empty).
   `chunk` is a map from `Noter.Chunker.chunk/4`.
   """
   def extract(session_path, context, chunk, opts \\ []) do
     hash = chunk_hash(chunk.chunk_text)
+    session_key = Path.basename(session_path)
 
-    case get_cached(session_path, chunk.chunk_index, hash) do
+    case get_cached(session_key, chunk.chunk_index, hash) do
       {:ok, result} ->
         {:ok, result}
 
       :miss ->
         case call_llm(context, chunk, opts) do
           {:ok, result} ->
-            cache_result(session_path, chunk.chunk_index, hash, result)
+            cache_result(session_key, chunk.chunk_index, hash, result)
             {:ok, result}
 
           {:error, _} = err ->
@@ -102,11 +95,11 @@ defmodule Noter.Extractor do
     end
   end
 
-  defp get_cached(session_path, chunk_index, hash) do
+  defp get_cached(session_key, chunk_index, hash) do
     query =
       from e in ChunkExtraction,
         where:
-          e.session_path == ^session_path and
+          e.session_path == ^session_key and
             e.chunk_index == ^chunk_index and
             e.chunk_hash == ^hash,
         select: e.result
@@ -117,15 +110,18 @@ defmodule Noter.Extractor do
     end
   end
 
-  defp cache_result(session_path, chunk_index, hash, result) do
-    %ChunkExtraction{}
-    |> ChunkExtraction.changeset(%{
-      session_path: session_path,
-      chunk_index: chunk_index,
-      chunk_hash: hash,
-      result: Jason.encode!(result)
-    })
-    |> Repo.insert(on_conflict: :nothing)
+  defp cache_result(session_key, chunk_index, hash, result) do
+    case %ChunkExtraction{}
+         |> ChunkExtraction.changeset(%{
+           session_path: session_key,
+           chunk_index: chunk_index,
+           chunk_hash: hash,
+           result: Jason.encode!(result)
+         })
+         |> Repo.insert(on_conflict: :nothing) do
+      {:ok, _} -> :ok
+      {:error, changeset} -> IO.puts("Warning: failed to cache chunk #{chunk_index}: #{inspect(changeset.errors)}")
+    end
   end
 
   defp call_llm(context, chunk, opts) do
@@ -173,9 +169,11 @@ defmodule Noter.Extractor do
     }
 
     with {:ok, content} <-
-           LLM.chat(messages, Keyword.put(opts, :response_format, response_format)),
-         {:ok, parsed} <- Jason.decode(content) do
-      {:ok, parsed}
+           LLM.chat(messages, Keyword.put(opts, :response_format, response_format)) do
+      case Jason.decode(content) do
+        {:ok, parsed} -> {:ok, parsed}
+        {:error, _} -> {:error, "LLM returned invalid JSON: #{String.slice(content, 0, 200)}"}
+      end
     end
   end
 

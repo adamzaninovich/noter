@@ -36,9 +36,8 @@ defmodule Noter.Campaign do
   def load_players(campaign_dir) do
     path = Path.join(campaign_dir, "players.toml")
 
-    with {:ok, content} <- File.read(path),
-         {:ok, map} <- Toml.decode(content) do
-      {:ok, map}
+    with {:ok, content} <- File.read(path) do
+      Toml.decode(content)
     end
   end
 
@@ -71,9 +70,17 @@ defmodule Noter.Campaign do
     content =
       corrections
       |> Enum.sort_by(fn {k, _} -> k end)
-      |> Enum.map_join("\n", fn {k, v} -> ~s(#{k} = "#{v}") end)
+      |> Enum.map_join("\n", fn {k, v} ->
+        ~s("#{toml_escape(k)}" = "#{toml_escape(v)}")
+      end)
 
     File.write(path, content <> "\n")
+  end
+
+  defp toml_escape(str) do
+    str
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\"", "\\\"")
   end
 
   @doc """

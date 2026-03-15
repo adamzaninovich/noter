@@ -28,54 +28,24 @@ defmodule Noter.Pipeline do
          {:ok, corrections} <- Campaign.load_corrections(campaign_dir),
          {:ok, players} <- Campaign.load_players(campaign_dir),
          {:ok, context} <- load_context(session_dir, opts),
-         {:ok, transcript} <- Session.read_transcript(session_dir) do
-      IO.puts(
-        "Transcript loaded: #{length(transcript.segments)} segments, #{trunc(transcript.duration)}s"
-      )
+         {:ok, transcript} <- Session.read_transcript(session_dir),
+         chunks = Chunker.chunk(transcript, corrections, players, opts),
+         _ = IO.puts("Transcript loaded: #{length(transcript.segments)} segments, #{trunc(transcript.duration)}s"),
+         _ = IO.puts("Chunks: #{length(chunks)}\n\nExtracting facts..."),
+         {:ok, fact_pairs} <- extract_all(chunks, session_dir, context, opts),
+         _ = IO.puts("\nAggregating facts..."),
+         facts = Aggregator.aggregate(fact_pairs),
+         _ = IO.puts("Writing notes..."),
+         {:ok, notes} <- Writer.write(context, facts, opts) do
+      notes_path = Session.notes_path(session_dir)
 
-      chunks = Chunker.chunk(transcript, corrections, players, opts)
-      IO.puts("Chunks: #{length(chunks)}")
-
-      IO.puts("\nExtracting facts...")
-
-      total = length(chunks)
-
-      extraction_result =
-        chunks
-        |> Task.async_stream(
-          fn chunk ->
-            IO.write(
-              "  chunk #{chunk.chunk_index}/#{total} (#{chunk.range_start}–#{chunk.range_end})... "
-            )
-
-            result = Extractor.extract(session_dir, context, chunk, opts)
-            IO.puts("done")
-            {chunk, result}
-          end,
-          max_concurrency: 3,
-          timeout: :infinity,
-          ordered: true
-        )
-        |> Enum.reduce_while({:ok, []}, fn
-          {:ok, {chunk, {:ok, facts}}}, {:ok, acc} -> {:cont, {:ok, [{chunk, facts} | acc]}}
-          {:ok, {_chunk, {:error, reason}}}, _ -> {:halt, {:error, "Extraction failed: #{inspect(reason)}"}}
-          {:exit, reason}, _ -> {:halt, {:error, "Task crashed: #{inspect(reason)}"}}
-        end)
-
-      with {:ok, fact_pairs_reversed} <- extraction_result do
-        fact_pairs = Enum.reverse(fact_pairs_reversed)
-
-        IO.puts("\nAggregating facts...")
-        facts = Aggregator.aggregate(fact_pairs)
-
-        IO.puts("Writing notes...")
-
-        with {:ok, notes} <- Writer.write(context, facts, opts) do
-          notes_path = Session.notes_path(session_dir)
-          File.write!(notes_path, notes)
+      case File.write(notes_path, notes) do
+        :ok ->
           IO.puts("Notes written to #{notes_path}")
           {:ok, notes_path}
-        end
+
+        {:error, reason} ->
+          {:error, "Failed to write notes to #{notes_path}: #{:file.format_error(reason)}"}
       end
     end
   end
@@ -87,38 +57,67 @@ defmodule Noter.Pipeline do
   def generate_context(session_dir, opts \\ []) do
     session_dir = Path.expand(session_dir)
 
-    case Session.find_previous_session(session_dir) do
+    with {:ok, prev_dir} <- Session.find_previous_session(session_dir),
+         _ = IO.puts("Using previous session: #{Path.basename(prev_dir)}"),
+         prev_context = read_or_default(Context.read(prev_dir)),
+         prev_notes = read_or_default(File.read(Session.notes_path(prev_dir))),
+         {:has_input, true} <- {:has_input, prev_context != "" || prev_notes != ""},
+         _ = IO.puts("Generating campaign context from previous session..."),
+         {:ok, context_md} <- Context.generate(prev_context, prev_notes, opts),
+         :ok <- Context.write(session_dir, context_md) do
+      IO.puts("Campaign context written to #{Session.context_path(session_dir)}")
+      {:ok, context_md}
+    else
       {:error, :no_previous_session} ->
         IO.puts("No previous session found — starting with empty context.")
-        with :ok <- Context.write(session_dir, ""), do: {:ok, ""}
+        write_empty_context(session_dir)
 
-      {:ok, prev_dir} ->
-        IO.puts("Using previous session: #{Path.basename(prev_dir)}")
+      {:has_input, false} ->
+        IO.puts("Previous session has no context or notes — starting with empty context.")
+        write_empty_context(session_dir)
 
-        prev_context =
-          case Context.read(prev_dir) do
-            {:ok, c} -> c
-            _ -> ""
-          end
+      error ->
+        error
+    end
+  end
 
-        prev_notes =
-          case File.read(Session.notes_path(prev_dir)) do
-            {:ok, n} -> n
-            _ -> ""
-          end
+  defp write_empty_context(session_dir) do
+    with :ok <- Context.write(session_dir, ""), do: {:ok, ""}
+  end
 
-        if prev_context == "" and prev_notes == "" do
-          IO.puts("Previous session has no context or notes — starting with empty context.")
-          with :ok <- Context.write(session_dir, ""), do: {:ok, ""}
-        else
-          IO.puts("Generating campaign context from previous session...")
+  defp read_or_default({:ok, content}), do: content
+  defp read_or_default(_), do: ""
 
-          with {:ok, context_md} <- Context.generate(prev_context, prev_notes, opts),
-               :ok <- Context.write(session_dir, context_md) do
-            IO.puts("Campaign context written to #{Session.context_path(session_dir)}")
-            {:ok, context_md}
-          end
-        end
+  defp extract_all(chunks, session_dir, context, opts) do
+    total = length(chunks)
+
+    result =
+      chunks
+      |> Task.async_stream(
+        fn chunk ->
+          result = Extractor.extract(session_dir, context, chunk, opts)
+          {chunk, result}
+        end,
+        max_concurrency: 3,
+        timeout: :infinity,
+        ordered: true
+      )
+      |> Enum.reduce_while({:ok, []}, fn
+        {:ok, {chunk, {:ok, facts}}}, {:ok, acc} ->
+          IO.puts("  chunk #{chunk.chunk_index}/#{total} (#{chunk.range_start}–#{chunk.range_end})... done")
+          {:cont, {:ok, [{chunk, facts} | acc]}}
+
+        {:ok, {chunk, {:error, reason}}}, _ ->
+          IO.puts("  chunk #{chunk.chunk_index}/#{total} (#{chunk.range_start}–#{chunk.range_end})... failed")
+          {:halt, {:error, "Extraction failed: #{inspect(reason)}"}}
+
+        {:exit, reason}, _ ->
+          {:halt, {:error, "Task crashed: #{inspect(reason)}"}}
+      end)
+
+    case result do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      error -> error
     end
   end
 

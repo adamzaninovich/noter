@@ -15,12 +15,20 @@ defmodule Noter.Corrections do
       (vocab ++ Map.keys(corrections) ++ Map.values(corrections))
       |> MapSet.new(&String.downcase/1)
 
-    srt_path
-    |> File.read!()
-    |> extract_srt_words()
-    |> Enum.reject(fn word -> MapSet.member?(known, String.downcase(word)) end)
-    |> Enum.uniq_by(&String.downcase/1)
-    |> Enum.sort()
+    case File.read(srt_path) do
+      {:ok, content} ->
+        terms =
+          content
+          |> extract_srt_words()
+          |> Enum.reject(fn word -> MapSet.member?(known, String.downcase(word)) end)
+          |> Enum.uniq_by(&String.downcase/1)
+          |> Enum.sort()
+
+        {:ok, terms}
+
+      {:error, reason} ->
+        {:error, "Could not read SRT file #{srt_path}: #{:file.format_error(reason)}"}
+    end
   end
 
   @doc """
@@ -35,18 +43,25 @@ defmodule Noter.Corrections do
 
     Enum.reduce_while(unknown_terms, corrections, fn term, acc ->
       IO.write("  #{term} → ")
-      input = IO.gets("") |> String.trim()
 
-      cond do
-        input == "q" ->
+      case IO.gets("") do
+        :eof ->
           {:halt, acc}
 
-        input == "" ->
-          {:cont, acc}
+        input ->
+          input = String.trim(input)
 
-        true ->
-          IO.puts("    saved: #{term} → #{input}")
-          {:cont, Map.put(acc, term, input)}
+          cond do
+            input == "q" ->
+              {:halt, acc}
+
+            input == "" ->
+              {:cont, acc}
+
+            true ->
+              IO.puts("    saved: #{term} → #{input}")
+              {:cont, Map.put(acc, term, input)}
+          end
       end
     end)
   end
@@ -57,8 +72,8 @@ defmodule Noter.Corrections do
     srt_content
     |> String.split("\n")
     |> Enum.reject(fn line ->
-      line = String.trim(line)
-      line == "" or Regex.match?(~r/^\d+$/, line) or Regex.match?(~r/\d{2}:\d{2}:\d{2}/, line)
+      trimmed = String.trim(line)
+      trimmed == "" || Regex.match?(~r/^\d+$/, trimmed) || Regex.match?(~r/\d{2}:\d{2}:\d{2}/, trimmed)
     end)
     |> Enum.flat_map(fn line ->
       ~r/[A-Za-z'\-]+/

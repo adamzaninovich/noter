@@ -19,52 +19,45 @@ defmodule Noter.Aggregator do
 
     collected =
       Enum.reduce(extractions, empty, fn {chunk, facts}, acc ->
+        range = {chunk.range_start_sec, chunk.range_start, chunk.range_end}
+
         Enum.reduce(@all_categories, acc, fn key, inner_acc ->
           entries =
             facts
             |> Map.get(key, [])
-            |> Enum.map(fn entry ->
-              Map.merge(entry, %{
-                "_range_start_sec" => chunk.range_start_sec,
-                "_range_start" => chunk.range_start,
-                "_range_end" => chunk.range_end
-              })
-            end)
+            |> Enum.map(fn entry -> {range, entry} end)
 
           Map.update!(inner_acc, key, &(entries ++ &1))
         end)
       end)
 
     # Sort chronologically
-    sorted = Map.new(collected, fn {k, v} -> {k, sort_by_range(v)} end)
+    sorted =
+      Map.new(collected, fn {k, v} ->
+        {k, Enum.sort_by(v, fn {{start_sec, _, _}, _} -> start_sec end)}
+      end)
 
     # Deduplicate
-    result =
-      sorted
-      |> dedupe_text_categories()
-      |> dedupe_named_categories()
-      |> cross_category_dedupe("decisions", "events")
-      |> cross_category_dedupe("combat", "events")
-
-    # Strip internal range tracking keys from output
-    Map.new(result, fn {k, v} ->
-      {k, Enum.map(v, &Map.drop(&1, ["_range_start_sec", "_range_start", "_range_end"]))}
-    end)
-  end
-
-  defp sort_by_range(items) do
-    Enum.sort_by(items, &Map.get(&1, "_range_start_sec", 0))
+    sorted
+    |> dedupe_text_categories()
+    |> dedupe_named_categories()
+    |> cross_category_dedupe("decisions", "events")
+    |> cross_category_dedupe("combat", "events")
   end
 
   defp dedupe_text_categories(facts) do
     Enum.reduce(@text_categories, facts, fn key, acc ->
-      Map.update!(acc, key, &dedupe_by_text/1)
+      Map.update!(acc, key, fn items ->
+        items
+        |> dedupe_by_text()
+        |> Enum.map(fn {_range, entry} -> entry end)
+      end)
     end)
   end
 
   defp dedupe_by_text(items) do
     items
-    |> Enum.reduce({[], MapSet.new()}, fn entry, {result, seen} ->
+    |> Enum.reduce({[], MapSet.new()}, fn {_range, entry} = tagged, {result, seen} ->
       case Map.get(entry, "text") do
         nil ->
           {result, seen}
@@ -75,7 +68,7 @@ defmodule Noter.Aggregator do
           if MapSet.member?(seen, key) do
             {result, seen}
           else
-            {[entry | result], MapSet.put(seen, key)}
+            {[tagged | result], MapSet.put(seen, key)}
           end
       end
     end)
@@ -91,7 +84,7 @@ defmodule Noter.Aggregator do
 
   defp merge_named(items) do
     items
-    |> Enum.reduce(%{}, fn entry, acc ->
+    |> Enum.reduce(%{}, fn {_range, entry}, acc ->
       case Map.get(entry, "name") do
         nil ->
           acc
@@ -99,28 +92,26 @@ defmodule Noter.Aggregator do
         name ->
           key = normalize(name)
           note = entry |> Map.get("notes", "") |> String.trim()
-          empty = %{"name" => String.trim(name), "notes" => [], "_notes_seen" => MapSet.new()}
+          empty = {String.trim(name), [], MapSet.new()}
 
           Map.update(acc, key, add_note(empty, note), &add_note(&1, note))
       end
     end)
     |> Map.values()
-    |> Enum.map(fn entry ->
-      notes = entry |> Map.fetch!("notes") |> Enum.reverse() |> Enum.join("; ")
-      %{"name" => entry["name"], "notes" => notes}
+    |> Enum.map(fn {name, notes, _seen} ->
+      %{"name" => name, "notes" => notes |> Enum.reverse() |> Enum.join("; ")}
     end)
   end
 
   defp add_note(entry, ""), do: entry
 
-  defp add_note(entry, note) do
+  defp add_note({name, notes, seen}, note) do
     key = normalize(note)
-    seen = Map.fetch!(entry, "_notes_seen")
 
     if MapSet.member?(seen, key) do
-      entry
+      {name, notes, seen}
     else
-      %{entry | "notes" => [note | entry["notes"]], "_notes_seen" => MapSet.put(seen, key)}
+      {name, [note | notes], MapSet.put(seen, key)}
     end
   end
 
@@ -128,19 +119,19 @@ defmodule Noter.Aggregator do
     secondary_set =
       facts
       |> Map.get(secondary_key, [])
-      |> Enum.flat_map(fn e ->
-        case Map.get(e, "text") do
+      |> Enum.flat_map(fn entry ->
+        case Map.get(entry, "text") do
           nil -> []
-          t -> [normalize(t)]
+          text -> [normalize(text)]
         end
       end)
       |> MapSet.new()
 
     Map.update!(facts, primary_key, fn items ->
-      Enum.reject(items, fn e ->
-        case Map.get(e, "text") do
+      Enum.reject(items, fn entry ->
+        case Map.get(entry, "text") do
           nil -> false
-          t -> MapSet.member?(secondary_set, normalize(t))
+          text -> MapSet.member?(secondary_set, normalize(text))
         end
       end)
     end)

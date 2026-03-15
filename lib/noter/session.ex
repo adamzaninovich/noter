@@ -76,17 +76,30 @@ defmodule Noter.Session do
     parent = Path.dirname(session_dir)
     current_name = Path.basename(session_dir)
 
+    current_num = extract_session_number(current_name)
+
     siblings =
       parent
       |> File.ls!()
       |> Enum.filter(fn name ->
-        File.dir?(Path.join(parent, name)) and name < current_name
+        File.dir?(Path.join(parent, name)) &&
+          session_dir?(name) &&
+          extract_session_number(name) < current_num
       end)
-      |> Enum.sort()
+      |> Enum.sort_by(&extract_session_number/1)
 
     case List.last(siblings) do
       nil -> {:error, :no_previous_session}
       name -> {:ok, Path.join(parent, name)}
+    end
+  end
+
+  defp session_dir?(name), do: Regex.match?(~r/-\d+$/, name)
+
+  defp extract_session_number(name) do
+    case Regex.run(~r/(\d+)$/, name) do
+      [_, n] -> String.to_integer(n)
+      _ -> 0
     end
   end
 

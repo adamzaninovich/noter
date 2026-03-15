@@ -68,9 +68,10 @@ defmodule Mix.Tasks.Noter.Prep do
           dir
 
         {:error, :not_found} ->
-          Mix.raise(
-            "Could not find campaign directory (no players.toml found walking up from #{session_dir})"
-          )
+          Mix.raise("""
+          Could not find campaign directory (no players.toml found walking up from #{session_dir}).
+          Expected layout: campaign_dir/players.toml with session dirs as children of campaign_dir.
+          """)
       end
 
     IO.puts("Preparing session: #{session_dir}")

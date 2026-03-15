@@ -31,25 +31,26 @@ defmodule Noter.Chunker do
 
     segments =
       transcript.segments
-      |> Enum.filter(fn s -> is_number(s.start) and is_number(s.end) end)
+      |> Enum.filter(fn s -> is_number(s.start) && is_number(s.end) end)
       |> Enum.sort_by(& &1.start)
 
     duration = transcript.duration
+    compiled_corrections = precompile_corrections(corrections)
 
-    build_chunks(segments, duration, chunk_size_sec, overlap_seconds, corrections, speaker_map)
+    build_chunks(segments, duration, chunk_size_sec, overlap_seconds, compiled_corrections, speaker_map)
   end
 
   defp build_chunks(segments, duration, chunk_size_sec, overlap_seconds, corrections, speaker_map) do
     0
     |> Stream.iterate(&(&1 + chunk_size_sec))
-    |> Stream.take_while(&(&1 < duration + 0.0001))
+    |> Stream.take_while(&(&1 < duration))
     |> Enum.with_index(1)
     |> Enum.flat_map(fn {window_start, chunk_index} ->
       window_end = min(duration, window_start + chunk_size_sec)
 
       window_segs =
         Enum.filter(segments, fn s ->
-          s.start >= window_start and s.start < window_end
+          s.start >= window_start && s.start < window_end
         end)
 
       if window_segs == [] do
@@ -61,7 +62,7 @@ defmodule Noter.Chunker do
             overlap_end = min(duration, window_end + overlap_seconds)
 
             Enum.filter(segments, fn s ->
-              s.start >= overlap_start and s.start < overlap_end
+              s.start >= overlap_start && s.start < overlap_end
             end)
           else
             window_segs
@@ -99,27 +100,32 @@ defmodule Noter.Chunker do
   end
 
   @doc """
-  Applies spelling/name corrections to text.
-  Single-word corrections use word boundaries; multi-word use plain replacement.
+  Precompiles correction patterns for efficient reuse across segments.
   """
-  def apply_corrections(text, corrections) when is_map(corrections) do
-    Enum.reduce(corrections, text, fn {from, to}, acc ->
-      if from == "", do: acc, else: replace_correction(acc, from, to)
+  def precompile_corrections(corrections) when is_map(corrections) do
+    corrections
+    |> Enum.reject(fn {from, _} -> from == "" end)
+    |> Enum.map(fn {from, to} ->
+      escaped = Regex.escape(from)
+
+      pattern =
+        if Regex.match?(~r/^[A-Za-z0-9_'\-]+$/, from) do
+          Regex.compile!("\\b#{escaped}\\b")
+        else
+          Regex.compile!(escaped)
+        end
+
+      {pattern, to}
     end)
   end
 
-  defp replace_correction(text, from, to) do
-    single_word? = Regex.match?(~r/^[A-Za-z0-9_'\-]+$/, from)
-    escaped = Regex.escape(from)
-
-    pattern =
-      if single_word? do
-        ~r/\b#{escaped}\b/
-      else
-        ~r/#{escaped}/
-      end
-
-    Regex.replace(pattern, text, to)
+  @doc """
+  Applies precompiled spelling/name corrections to text.
+  """
+  def apply_corrections(text, compiled_corrections) when is_list(compiled_corrections) do
+    Enum.reduce(compiled_corrections, text, fn {pattern, to}, acc ->
+      Regex.replace(pattern, acc, to)
+    end)
   end
 
   defp normalize_whitespace(str) do
