@@ -39,13 +39,10 @@ defmodule Noter.LLM do
            receive_timeout: 120_000
          ) do
       {:ok, %{status: 200, body: resp_body}} ->
-        content =
-          resp_body
-          |> Map.fetch!("choices")
-          |> hd()
-          |> get_in(["message", "content"])
-
-        {:ok, content}
+        case Map.fetch!(resp_body, "choices") do
+          [first | _] -> {:ok, get_in(first, ["message", "content"])}
+          [] -> {:error, "OpenAI returned no choices"}
+        end
 
       {:ok, %{status: status}} when status in [429, 500, 502, 503] and attempt < @max_retries ->
         backoff = @initial_backoff_ms * Integer.pow(2, attempt)

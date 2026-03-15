@@ -17,6 +17,19 @@ defmodule Noter.Extractor do
     }
   }
 
+  @named_entity_schema %{
+    "type" => "array",
+    "items" => %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "required" => ["name", "notes"],
+      "properties" => %{
+        "name" => %{"type" => "string"},
+        "notes" => %{"type" => "string"}
+      }
+    }
+  }
+
   @extraction_schema %{
     "type" => "object",
     "additionalProperties" => false,
@@ -35,30 +48,8 @@ defmodule Noter.Extractor do
     "properties" => %{
       "range" => %{"type" => "string"},
       "events" => @text_array_schema,
-      "locations" => %{
-        "type" => "array",
-        "items" => %{
-          "type" => "object",
-          "additionalProperties" => false,
-          "required" => ["name", "notes"],
-          "properties" => %{
-            "name" => %{"type" => "string"},
-            "notes" => %{"type" => "string"}
-          }
-        }
-      },
-      "npcs" => %{
-        "type" => "array",
-        "items" => %{
-          "type" => "object",
-          "additionalProperties" => false,
-          "required" => ["name", "notes"],
-          "properties" => %{
-            "name" => %{"type" => "string"},
-            "notes" => %{"type" => "string"}
-          }
-        }
-      },
+      "locations" => @named_entity_schema,
+      "npcs" => @named_entity_schema,
       "info_learned" => @text_array_schema,
       "combat" => @text_array_schema,
       "decisions" => @text_array_schema,
@@ -105,8 +96,14 @@ defmodule Noter.Extractor do
         select: e.result
 
     case Repo.one(query) do
-      nil -> :miss
-      json -> {:ok, Jason.decode!(json)}
+      nil ->
+        :miss
+
+      json ->
+        case Jason.decode(json) do
+          {:ok, result} -> {:ok, result}
+          {:error, _} -> :miss
+        end
     end
   end
 
@@ -119,8 +116,11 @@ defmodule Noter.Extractor do
            result: Jason.encode!(result)
          })
          |> Repo.insert(on_conflict: :nothing) do
-      {:ok, _} -> :ok
-      {:error, changeset} -> IO.puts("Warning: failed to cache chunk #{chunk_index}: #{inspect(changeset.errors)}")
+      {:ok, _} ->
+        :ok
+
+      {:error, changeset} ->
+        IO.puts("Warning: failed to cache chunk #{chunk_index}: #{inspect(changeset.errors)}")
     end
   end
 

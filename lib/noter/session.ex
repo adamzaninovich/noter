@@ -78,19 +78,23 @@ defmodule Noter.Session do
 
     current_num = extract_session_number(current_name)
 
-    siblings =
-      parent
-      |> File.ls!()
-      |> Enum.filter(fn name ->
-        File.dir?(Path.join(parent, name)) &&
-          session_dir?(name) &&
-          extract_session_number(name) < current_num
-      end)
-      |> Enum.sort_by(&extract_session_number/1)
+    case File.ls(parent) do
+      {:ok, entries} ->
+        entries
+        |> Enum.filter(fn name ->
+          File.dir?(Path.join(parent, name)) &&
+            session_dir?(name) &&
+            extract_session_number(name) < current_num
+        end)
+        |> Enum.sort_by(&extract_session_number/1)
+        |> List.last()
+        |> case do
+          nil -> {:error, :no_previous_session}
+          name -> {:ok, Path.join(parent, name)}
+        end
 
-    case List.last(siblings) do
-      nil -> {:error, :no_previous_session}
-      name -> {:ok, Path.join(parent, name)}
+      {:error, _} ->
+        {:error, :no_previous_session}
     end
   end
 

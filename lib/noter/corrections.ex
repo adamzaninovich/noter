@@ -73,7 +73,9 @@ defmodule Noter.Corrections do
     |> String.split("\n")
     |> Enum.reject(fn line ->
       trimmed = String.trim(line)
-      trimmed == "" || Regex.match?(~r/^\d+$/, trimmed) || Regex.match?(~r/\d{2}:\d{2}:\d{2}/, trimmed)
+
+      trimmed == "" || Regex.match?(~r/^\d+$/, trimmed) ||
+        Regex.match?(~r/\d{2}:\d{2}:\d{2}/, trimmed)
     end)
     |> Enum.flat_map(fn line ->
       ~r/[A-Za-z'\-]+/

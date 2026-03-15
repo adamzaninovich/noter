@@ -101,8 +101,11 @@ defmodule Mix.Tasks.Noter.Run do
 
           if updated != corrections do
             case Noter.Campaign.save_corrections(campaign_dir, updated) do
-              :ok -> IO.puts("Corrections saved.")
-              {:error, reason} -> IO.puts("Warning: could not save corrections: #{inspect(reason)}")
+              :ok ->
+                IO.puts("Corrections saved.")
+
+              {:error, reason} ->
+                IO.puts("Warning: could not save corrections: #{inspect(reason)}")
             end
           end
         end
@@ -125,5 +128,4 @@ defmodule Mix.Tasks.Noter.Run do
         Mix.raise("Pipeline failed: #{reason}")
     end
   end
-
 end

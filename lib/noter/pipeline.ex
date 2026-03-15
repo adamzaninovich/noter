@@ -30,7 +30,10 @@ defmodule Noter.Pipeline do
          {:ok, context} <- load_context(session_dir, opts),
          {:ok, transcript} <- Session.read_transcript(session_dir),
          chunks = Chunker.chunk(transcript, corrections, players, opts),
-         _ = IO.puts("Transcript loaded: #{length(transcript.segments)} segments, #{trunc(transcript.duration)}s"),
+         _ =
+           IO.puts(
+             "Transcript loaded: #{length(transcript.segments)} segments, #{trunc(transcript.duration)}s"
+           ),
          _ = IO.puts("Chunks: #{length(chunks)}\n\nExtracting facts..."),
          {:ok, fact_pairs} <- extract_all(chunks, session_dir, context, opts),
          _ = IO.puts("\nAggregating facts..."),
@@ -59,8 +62,8 @@ defmodule Noter.Pipeline do
 
     with {:ok, prev_dir} <- Session.find_previous_session(session_dir),
          _ = IO.puts("Using previous session: #{Path.basename(prev_dir)}"),
-         prev_context = read_or_default(Context.read(prev_dir)),
-         prev_notes = read_or_default(File.read(Session.notes_path(prev_dir))),
+         {:ok, prev_context} <- read_or_default(Context.read(prev_dir)),
+         {:ok, prev_notes} <- read_or_default(File.read(Session.notes_path(prev_dir))),
          {:has_input, true} <- {:has_input, prev_context != "" || prev_notes != ""},
          _ = IO.puts("Generating campaign context from previous session..."),
          {:ok, context_md} <- Context.generate(prev_context, prev_notes, opts),
@@ -85,8 +88,8 @@ defmodule Noter.Pipeline do
     with :ok <- Context.write(session_dir, ""), do: {:ok, ""}
   end
 
-  defp read_or_default({:ok, content}), do: content
-  defp read_or_default(_), do: ""
+  defp read_or_default({:ok, content}), do: {:ok, content}
+  defp read_or_default({:error, _} = err), do: err
 
   defp extract_all(chunks, session_dir, context, opts) do
     total = length(chunks)
@@ -104,11 +107,17 @@ defmodule Noter.Pipeline do
       )
       |> Enum.reduce_while({:ok, []}, fn
         {:ok, {chunk, {:ok, facts}}}, {:ok, acc} ->
-          IO.puts("  chunk #{chunk.chunk_index}/#{total} (#{chunk.range_start}–#{chunk.range_end})... done")
+          IO.puts(
+            "  chunk #{chunk.chunk_index}/#{total} (#{chunk.range_start}–#{chunk.range_end})... done"
+          )
+
           {:cont, {:ok, [{chunk, facts} | acc]}}
 
         {:ok, {chunk, {:error, reason}}}, _ ->
-          IO.puts("  chunk #{chunk.chunk_index}/#{total} (#{chunk.range_start}–#{chunk.range_end})... failed")
+          IO.puts(
+            "  chunk #{chunk.chunk_index}/#{total} (#{chunk.range_start}–#{chunk.range_end})... failed"
+          )
+
           {:halt, {:error, "Extraction failed: #{inspect(reason)}"}}
 
         {:exit, reason}, _ ->

@@ -37,7 +37,14 @@ defmodule Noter.Chunker do
     duration = transcript.duration
     compiled_corrections = precompile_corrections(corrections)
 
-    build_chunks(segments, duration, chunk_size_sec, overlap_seconds, compiled_corrections, speaker_map)
+    build_chunks(
+      segments,
+      duration,
+      chunk_size_sec,
+      overlap_seconds,
+      compiled_corrections,
+      speaker_map
+    )
   end
 
   defp build_chunks(segments, duration, chunk_size_sec, overlap_seconds, corrections, speaker_map) do
