@@ -8,7 +8,7 @@ defmodule Noter.Corrections do
   Reads a merged SRT file and extracts all unique words not already covered
   by `vocab` or `corrections`.
 
-  Returns a sorted list of suspicious terms.
+  Returns `{:ok, sorted_terms}` or `{:error, reason}`.
   """
   def find_unknown_terms(srt_path, vocab, corrections) do
     known =

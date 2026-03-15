@@ -68,7 +68,7 @@ defmodule Noter.Session do
 
   @doc """
   Finds the previous session directory by looking at sibling directories
-  (sorted lexicographically) and returning the one immediately before
+  (sorted by session number) and returning the one immediately before
   `session_dir`. Returns `{:ok, prev_dir}` or `{:error, :no_previous_session}`.
   """
   def find_previous_session(session_dir) do
