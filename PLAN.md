@@ -1,604 +1,130 @@
-# noter — Phoenix Application
+# noter — Session Processing Web App
 
-Replaces the n8n workflow and `process-transcript` bash script. Built as a
-Phoenix application from the start so the web UI (phase 2) is an extension of
-the same project rather than a rewrite. Core domain logic is interface-agnostic;
-Mix tasks provide the CLI now, `NoterWeb` will provide the web UI later.
+Phoenix LiveView application for processing TTRPG session recordings: upload
+multitrack audio, trim, transcribe via external service, review/correct
+transcripts, and download a packaged result.
 
-## Full session workflow
-
-```
-1.  [manual]           Receive zip archive of per-player flac files from Craig bot
-2.  [manual]           Listen to merged recording, note session start/end timestamps
-3.  [mix noter.prep]   Extract zip, clip tracks to timestamps, rename to character names
-4.  [manual]           Review and update vocab.txt for this session
-5.  [transcribe-audio] Run existing Docker transcription pipeline
-6.  [mix noter.run]    Review merged SRT, triage misspellings → update corrections
-7.  [mix noter.run]    Run LLM pipeline → session notes
-8.  [mix noter.run]    Update campaign context from new notes (for next session)
-9.  [manual]           Review and edit final notes
-```
-
-Steps 3, 7, and 8 are fully automatable. Step 6 is partially automatable
-(flag suspicious terms; human confirms). Steps 2, 4, and 9 stay manual.
-
-Step 2 (timestamp finding) and step 6 (corrections review) are the strongest
-candidates for the phase 2 web UI — both involve media interaction that is
-awkward in a terminal.
-
-## Bootstrapping
-
-```bash
-phx.new noter --database sqlite3 --no-mailer
-```
-
-Phoenix + Ecto + SQLite + LiveView. No mailer. SQLite is sufficient and keeps
-deployment simple for a personal tool.
-
-## Architecture
-
-Core domain logic lives in `lib/noter/` with no awareness of CLI or web.
-Mix tasks and the Phoenix web layer are both adapters on top of the same modules.
+## Workflow
 
 ```
-noter/
-  lib/
-    noter/
-      # Core domain (pure functions, no interface dependencies)
-      pipeline.ex         # orchestrates the full LLM pipeline
-      chunker.ex          # transcript chunking + applying corrections
-      extractor.ex        # per-chunk fact extraction (structured JSON)
-      aggregator.ex       # merge + deduplicate facts across chunks
-      writer.ex           # note writing from aggregated facts
-      context.ex          # update campaign context from session notes
-      prep.ex             # extract zip, clip + rename audio files
-      corrections.ex      # SRT review + corrections triage
-      llm.ex              # OpenAI Chat Completions HTTP client
-      campaign.ex         # load campaign config files
-      session.ex          # find/validate session files
-    noter_web/            # Phase 2 — Phoenix web interface
-      ...
-  lib/mix/tasks/noter/
-    prep.ex               # mix noter.prep
-    run.ex                # mix noter.run
-  priv/
-    repo/migrations/      # Ecto migrations
-  mix.exs
-  mix.lock
+1. Select/create campaign (player mapping lives in DB)
+2. Create new session → upload zip of per-player FLACs + merged AAC + vocab.txt
+3. Rename FLACs: discord usernames → character names via campaign player map
+4. Trim audio: waveform UI on merged AAC to set start/end, apply to all FLACs
+5. Transcribe: send trimmed files + vocab to transcription service, stream progress
+6. Review: inspect SRT/JSON transcripts, make corrections
+7. Download: zip of trimmed audio, corrected transcripts, vocab
 ```
 
-Ecto / SQLite is used for caching LLM extraction results per chunk (avoids
-re-spending API calls on re-runs) and tracking processed sessions. Campaign
-config stays as human-editable files (see below).
+## Data Model
 
-## Campaign config
+### campaigns
 
-A campaign directory holds config that persists across sessions. All
-human-editable files use TOML — no JSON.
+| Column       | Type    | Notes                               |
+|--------------|---------|-------------------------------------|
+| id           | integer | PK                                  |
+| name         | string  | e.g. "Stonewalkers"                 |
+| player_map   | map     | `%{"discord_name" => "Character"}`  |
+| inserted_at  | utc_dt  |                                     |
+| updated_at   | utc_dt  |                                     |
 
-```
-~/campaigns/stormlight/
-  players.toml        # discord username → character name (set once, reused)
-  corrections.toml    # cumulative corrections {"Alefi" = "Alethi", ...}
-  context.md          # current campaign context (prose, updated after each session)
-  vocab.txt           # whisper vocabulary hints (reviewed each session)
-```
+### sessions
 
-Example `players.toml`:
-```toml
-vastlysuperiorman = "Tarra"
-indifferentpineapple = "Rinah"
-nate6484 = "GM"
-tuffymcfuklbee = "Milo"
-_karmapolice_ = "Xi"
-taevus = "Kai"
-```
+| Column              | Type    | Notes                                         |
+|---------------------|---------|-----------------------------------------------|
+| id                  | integer | PK                                            |
+| campaign_id         | integer | FK → campaigns                                |
+| name                | string  | e.g. "Session 3"                              |
+| status              | string  | `uploading` → `uploaded` → `trimmed` → `transcribing` → `transcribed` → `reviewing` → `done` |
+| trim_start_seconds  | float   | set during trim step                          |
+| trim_end_seconds    | float   | set during trim step                          |
+| transcription_job_id| string  | from transcription service                    |
+| transcript_json     | text    | raw JSON result from transcription service    |
+| transcript_srt      | text    | raw SRT result from transcription service     |
+| corrections         | map     | `%{"wrong" => "right"}` applied during review |
+| inserted_at         | utc_dt  |                                                |
+| updated_at          | utc_dt  |                                                |
 
-Example `corrections.toml`:
-```toml
-Alefi = "Alethi"
-Alephi = "Alethi"
-Harold = "herald"
-Taro = "Tarra"
-```
+Uploaded files (zip, AAC, vocab, individual FLACs) are stored on disk under
+`priv/uploads/<session_id>/`. Trimmed files go under
+`priv/uploads/<session_id>/trimmed/`.
 
-### Campaign directory discovery
+## Pages / LiveViews
 
-Mix tasks take the session directory as an argument and walk up the directory
-tree looking for `players.toml`. This mirrors how `git` finds its config.
+### Campaign management
+- `GET /` — list campaigns, create new
+- `GET /campaigns/:id` — edit campaign (name, player map), list sessions
 
-Note: no, players.toml will be a permanent mapping and should live in the campaign directory (parent of the session dir)
+### Session workflow (single LiveView with step navigation)
+- `GET /campaigns/:campaign_id/sessions/new` — create session + upload files
+- `GET /campaigns/:campaign_id/sessions/:id` — session workspace
 
-```bash
-mix noter.prep ~/sessions/stonewalkers/session-3 --start 00:13:57 --end 03:27:37
-<run transcribe-audio script>
-mix noter.run ~/sessions/stonewalkers/session-3
-```
+The session workspace is a single LiveView that walks through the workflow
+steps. Each step is a component rendered based on `session.status`:
 
-## Session directory layout
+1. **Upload** — drag-and-drop zip + AAC + vocab.txt, extract zip, rename FLACs
+2. **Trim** — waveform player for merged AAC, set start/end, apply trim to all files
+3. **Transcribe** — kick off job, show live SSE progress
+4. **Review** — scrollable SRT with inline editing, corrections map
+5. **Done** — download button
 
-```
-~/sessions/stonewalkers/
-  players.toml
-  session-3/
-    campaign-context.md
-    [raw zip contents after extract]
-    1-vastlysuperiorman.flac
-    2-indifferentpineapple.flac
-    ...
-    [after mix noter.prep]
-    tracks/
-      vocab.txt
-      Tarra.flac
-      Rinah.flac
-      ...
-    [after running transcribe-audio script (different project)]
-    transcripts/
-      Kai.json
-      Rinah.json
-      merged.json
-      merged.srt
-    [after running mix noter.run]
-    session-3-notes.md
-```
+## Key Implementation Details
 
-## Mix tasks
+### File handling
+- Uploads use `allow_upload` with `:live_file_input` — zip, AAC, and vocab
+- On upload complete: extract zip, identify FLAC files, rename using campaign
+  player map, store in session upload dir
+- Trimming calls ffmpeg to clip all FLACs and convert the merged AAC to M4A
 
-### `mix noter.prep`
+### Audio trimming UI
+- Use a JS audio waveform library (wavesurfer.js) via phx-hook
+- Load the merged AAC file, let user drag/click to set start and end markers
+- Push start/end times to server, server stores on session record
+- When confirmed, run ffmpeg to clip all files server-side
 
-Handles everything between receiving the zip and running transcription.
+### Transcription
+- POST trimmed FLAC files + vocab.txt to `POST /jobs` on the transcription service
+- Connect to `GET /jobs/{job_id}/events` SSE stream from the server (Elixir process)
+- Broadcast progress events via PubSub to the LiveView
+- On `done` event, store result JSON and SRT on the session record
 
-```bash
-mix noter.prep ~/sessions/stonewalkers/session-3 --start 00:13:57 --end 03:27:37
-```
+### Transcript review
+- Render SRT segments in a scrollable list
+- Each segment shows timestamp, speaker, text — text is editable inline
+- Corrections accumulate in the session's corrections map
+- Apply corrections to both SRT and JSON before download
 
-1. Discovers campaign dir by walking up from the session directory
-2. Extracts zip into session directory
-3. Clips each flac track to the given timestamps via ffmpeg
-4. Renames files using `players.toml` (discord username → character name) and moves them to tracks/
+### Download
+- Build zip on the fly containing:
+  ```
+  <Campaign> <Session>/
+  ├── <Campaign> <Session> Merged.m4a
+  ├── tracks/
+  │   ├── GM.flac
+  │   ├── Kai.flac
+  │   └── ...
+  ├── transcripts/
+  │   ├── merged.json
+  │   └── merged.srt
+  └── vocab.txt
+  ```
+- Corrections are applied to transcript files in the zip
 
-### `mix noter.run`
-
-Replaces `process-transcript`. Runs against a completed transcription.
-
-```bash
-mix noter.run ~/sessions/stonewalkers/session-3
-```
-
-Stages (each skippable via flags):
-
-1. **review** — shows terms from merged SRT not in vocab.txt or corrections.toml;
-   prompts to add corrections interactively, saves back to corrections.toml
-2. **process** — runs the LLM pipeline (chunk → extract → aggregate → write notes),
-   caches per-chunk extraction results in SQLite
-3. **update-context** — feeds new notes + existing context to LLM, writes
-   updated `context.md` to campaign directory for next session
-   - no I think I want to save each sessions's context doc separately in the session dir. so maybe this step should run first, getting the context and notes from the previous session?
-    ie. running this in session 3 should start with no context file in session-3, it should look for ../session-2/{campaign-context.md,session-2-notes.md} and use those to generate the session 3 context file before the it creates the notes
+### Transcription service
+- Base URL configured in app config (e.g. `config :noter, :transcription_url`)
+- See `transcription-api-docs.md` for full API spec
 
 ## Dependencies
 
-- `phoenix`, `phoenix_live_view`, `ecto_sqlite3` — from `phx.new`
-- `req` — HTTP client for OpenAI API calls
-- `jason` — already included by Phoenix
-- `{:toml, "~> 0.7"}` — parsing TOML campaign config files
+Already have:
+- `phoenix`, `phoenix_live_view`, `ecto_sqlite3`, `req`, `jason`
 
-No OpenAI Elixir library — a thin `llm.ex` wrapper over `Req` against the
-stable Chat Completions API is straightforward.
+Need to add:
+- wavesurfer.js (npm, for audio waveform UI)
 
-## LLM
+## Future work (out of scope now)
 
-OpenAI Chat Completions API:
-- Structured outputs (JSON schema enforcement) for fact extraction
-- Plain completion for note writing and context updates
-
-API key from environment / sops-nix secrets, same pattern as `HF_TOKEN`.
-Multi-model support (Ollama, Claude) can be added later if needed.
- maybe we should use direnv and a .env file with the secrets in it?
-
-## Phase 2: web UI
-
-The web app is the same Phoenix project with `NoterWeb` filled in — no
-rearchitecting required. Deployment: `mix release` built into a Docker
-container, kept running, with new releases pushed to it.
-
-Campaign directory is configured in `config.exs` rather than discovered by
-walking up the tree. The web UI adds:
-
-- **Session management** — create a new session (upload zip), or open an
-  existing session
-- **Waveform scrubber** — play merged recording, click to set start/end
-  timestamps, feeds into the prep pipeline
-- **Corrections review** — audio-synced SRT view, click a line to hear it,
-  quickly accept/reject/edit corrections
-
-LiveView is well-suited to all of these.
-
-## Open questions
-
-None outstanding — ready to build.
-
-## Existing n8n workflow that this is replacing
-
-```json
-{
-  "name": "Process Transcript",
-  "nodes": [
-    {
-      "parameters": {
-        "jsCode": "// Parse uploaded JSON file from n8n binary storage (filesystem-v2 compatible)\n\nconst binary = $input.item.binary?.file;\nif (!binary) {\n  throw new Error('No file uploaded under field name \"file\"');\n}\n\nconst buf = await this.helpers.getBinaryDataBuffer(0, 'file');\nconst jsonString = buf.toString('utf8').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(jsonString);\n} catch (error) {\n  const preview = jsonString.slice(0, 200);\n  throw new Error(`Uploaded file is not valid JSON. First 200 chars: ${JSON.stringify(preview)}`);\n}\n\n// If JSON is an array, wrap into object using the key your chunker expects\nif (Array.isArray(parsed)) {\n  parsed = { segments: parsed };\n}\n\n// Parse speaker map from form body (arrives as a JSON string)\nconst rawMap = $input.first().json.body?.speaker_map;\nif (rawMap) {\n  parsed._speakerMap = typeof rawMap === 'string' ? JSON.parse(rawMap) : rawMap;\n}\n\nreturn [{ json: parsed }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1968,
-        -128
-      ],
-      "id": "c7e9c5b4-1b5e-4fec-85ab-00ed207c8634",
-      "name": "Parse JSON"
-    },
-    {
-      "parameters": {
-        "mode": "raw",
-        "jsonOutput": "{\n  \"_chunkMinutes\": 10,\n  \"_overlapSeconds\": 0,\n  \"_includeSegments\": false,\n  \"_corrections\": {\n    \"Alefi\": \"Alethi\",\n    \"Alephi\": \"Alethi\",\n    \"A lefty\": \"Alethi\",\n    \"Osprey\": \"awespren\",\n    \"Troll\": \"chull\",\n    \"chawl\": \"chull\",\n    \"crema\": \"crem\",\n    \"cram\": \"crem\",\n    \"Harold\": \"herald\",\n    \"Okuru Maki\": \"Kaimoku'ruunaki\",\n    \"Slowlanders\": \"Lowlanders\",\n    \"Milo Ren\": \"Miloren\",\n    \"reshy\": \"Reshi\",\n    \"Rina\": \"Rinah\",\n    \"Reina\": \"Rinah\",\n    \"Spirith\": \"spear in your gut\",\n    \"Taro\": \"Tarra\",\n    \"Tara\": \"Tarra\",\n    \"Tazo\": \"Taszo\",\n    \"Thalen\": \"Thaylen\",\n    \"Beth\": \"Veth\",\n    \"Vess\": \"Veth\",\n    \"Vest\": \"Veth\",\n    \"Z-Lock\": \"Xilak\",\n    \"Rule 20\": \"Roll20\",\n    \"Parchment\": \"parshman\",\n    \"parchment\": \"parshmen\",\n    \"z\": \"Xi\",\n    \"Z\": \"Xi\",\n    \"Zee\": \"Xi\",\n    \"zee\": \"Xi\",\n    \"Vev\": \"Veb\",\n    \"Bev\": \"Veb\",\n    \"Eb\": \"Veb\",\n    \"spears\": \"spheres\",\n    \"lists\": \"Liss\",\n    \"list\": \"Liss\",\n    \"Rivlik\": \"Ryvlk\",\n    \"Soulcastle\": \"soulcast\"\n    \n  }\n}",
-        "includeOtherFields": true,
-        "options": {}
-      },
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        2416,
-        -128
-      ],
-      "id": "b9c3e154-a88c-42c5-89fc-8b12751602a0",
-      "name": "Set Config"
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "process-transcript",
-        "authentication": "headerAuth",
-        "responseMode": "lastNode",
-        "responseData": "firstEntryBinary",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2.1,
-      "position": [
-        1744,
-        -128
-      ],
-      "id": "c38bbfa7-a2f6-490d-bb17-04e6c42976e5",
-      "name": "Receive Transcript",
-      "webhookId": "22c2be27-ec95-48fd-85b9-032367e44283",
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "GtIIlRxiZHEWEDBF",
-          "name": "Process Transcript Header Auth Token"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// n8n Code node: Chunk Whisper JSON transcript into time windows\n// Input: items[0].json has { duration, segments: [{start,end,text,speaker,words?}, ...] }\n// Output: one item per chunk with chunkText suitable for LLM processing.\n\nfunction pad2(n) {\n  return String(n).padStart(2, \"0\");\n}\n\nfunction secToHms(sec) {\n  const s = Math.max(0, Math.floor(sec));\n  const h = Math.floor(s / 3600);\n  const m = Math.floor((s % 3600) / 60);\n  const ss = s % 60;\n  return `${pad2(h)}:${pad2(m)}:${pad2(ss)}`;\n}\n\nfunction normalizeWhitespace(str) {\n  return String(str ?? \"\")\n    .replace(/\\s+/g, \" \")\n    .trim();\n}\n\n/**\n * Apply spelling/name corrections.\n * corrections is an object like: { \"Keth\": \"Kaeth\", \"Thaylen\": \"Thaylenah\" }\n * This does simple global replacement with word boundaries where possible.\n */\nfunction applyCorrections(text, corrections) {\n  let out = text;\n  for (const [from, to] of Object.entries(corrections || {})) {\n    if (!from) continue;\n\n    // If \"from\" looks like a single word, use word boundaries.\n    // Otherwise do a plain global replace.\n    const isSingleWord = /^[A-Za-z0-9_'-]+$/.test(from);\n    if (isSingleWord) {\n      const re = new RegExp(`\\\\b${from.replace(/[.*+?^${}()|[\\]\\\\]/g, \"\\\\$&\")}\\\\b`, \"g\");\n      out = out.replace(re, to);\n    } else {\n      const re = new RegExp(from.replace(/[.*+?^${}()|[\\]\\\\]/g, \"\\\\$&\"), \"g\");\n      out = out.replace(re, to);\n    }\n  }\n  return out;\n}\n\nfunction buildLine(seg, corrections, speakerMap) {\n  const ts = secToHms(seg.start);\n  const rawSpeaker = seg.speaker ?? \"UNKNOWN\";\n  const speaker = speakerMap[rawSpeaker] ?? rawSpeaker;\n  const text = applyCorrections(normalizeWhitespace(seg.text), corrections);\n  if (!text) return null;\n  return `[${ts}] ${speaker}: ${text}`;\n}\n\n// --- Configuration you can tweak in the node UI via item.json settings ---\n// If you want configurable settings, you can set these upstream in a Set node:\n// items[0].json._chunkMinutes, items[0].json._overlapSeconds, items[0].json._includeSegments, items[0].json._corrections\n\nconst input = items[0].json;\nconst speakerMap = input._speakerMap ?? {};\n\n// Default to 10 minute chunks for long sessions, works well for 3 hour audio\nconst chunkMinutes = Number(input._chunkMinutes ?? 10);\nconst chunkSizeSec = Math.max(60, Math.floor(chunkMinutes * 60));\n\n// Optional overlap (helps with boundary context). Usually 0 is fine for fact extraction.\nconst overlapSec = Number(input._overlapSeconds ?? 0);\n\n// Include lightweight segments array in output (for debugging). Set false to reduce payload.\nconst includeSegments = Boolean(input._includeSegments ?? false);\n\n// Corrections map: set input._corrections = { \"Keth\": \"Kaeth\", ... } upstream if desired\nconst corrections = input._corrections ?? {};\n\n// Validate\nif (!input || !Array.isArray(input.segments)) {\n  throw new Error(\"Expected items[0].json.segments to be an array\");\n}\n\n// 1) Normalize and sort segments by start time\nconst segments = input.segments\n  .map((s) => ({\n    start: Number(s.start),\n    end: Number(s.end),\n    speaker: s.speaker ?? \"UNKNOWN\",\n    text: s.text ?? \"\",\n    // Intentionally ignore s.words to keep memory small\n  }))\n  .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end))\n  .sort((a, b) => a.start - b.start);\n\n// 2) Determine duration\nconst durationSec =\n  Number.isFinite(Number(input.duration)) ? Number(input.duration) :\n  (segments.length ? Math.max(...segments.map((s) => s.end)) : 0);\n\n// 3) Build chunk windows [0..duration) stepping by chunkSizeSec\nconst outputs = [];\nlet chunkIndex = 0;\n\nfor (let windowStart = 0; windowStart < durationSec + 0.0001; windowStart += chunkSizeSec) {\n  const windowEnd = Math.min(durationSec, windowStart + chunkSizeSec);\n\n  // Select segments whose start is within the window\n  const windowSegs = segments.filter((s) => s.start >= windowStart && s.start < windowEnd);\n\n  if (windowSegs.length === 0) {\n    // Skip empty windows\n    continue;\n  }\n\n  // Optional overlap: add a little context before/after by including segments that start in overlap region\n  let finalSegs = windowSegs;\n  if (overlapSec > 0) {\n    const overlapStart = Math.max(0, windowStart - overlapSec);\n    const overlapEnd = Math.min(durationSec, windowEnd + overlapSec);\n    finalSegs = segments.filter((s) => s.start >= overlapStart && s.start < overlapEnd);\n  }\n\n  // Build compact chunk text\n  const lines = [];\n  for (const seg of finalSegs) {\n    const line = buildLine(seg, corrections, speakerMap);\n    if (line) lines.push(line.trim());\n  }\n\n  // Small optimization: if crosstalk causes identical lines due to duplication, remove exact dupes\n  const dedupedLines = [...new Set(lines.map(l => l.trim()))];\n\n  chunkIndex += 1;\n\n  const out = {\n    chunkIndex,\n    rangeStartSec: windowStart,\n    rangeEndSec: windowEnd,\n    rangeStart: secToHms(windowStart),\n    rangeEnd: secToHms(windowEnd),\n    chunkText: dedupedLines.join(\"\\n\"),\n  };\n\n  if (includeSegments) {\n    out.segments = finalSegs.map((s) => ({\n      start: s.start,\n      end: s.end,\n      speaker: s.speaker,\n      text: applyCorrections(normalizeWhitespace(s.text), corrections),\n    }));\n  }\n\n  outputs.push({ json: out });\n}\n\nreturn outputs;"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2640,
-        -128
-      ],
-      "id": "830ab72c-b71a-4ca3-a0b8-b8b69a24089b",
-      "name": "Chunk Transcript"
-    },
-    {
-      "parameters": {
-        "model": {
-          "__rl": true,
-          "value": "gpt-5.2",
-          "mode": "list",
-          "cachedResultName": "gpt-5.2"
-        },
-        "builtInTools": {},
-        "options": {
-          "reasoningEffort": "low"
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1.3,
-      "position": [
-        2872,
-        96
-      ],
-      "id": "6733ebff-5e6b-49c8-a961-b07faf615973",
-      "name": "GPT-5.2 Low Effort",
-      "credentials": {
-        "openAiApi": {
-          "id": "spVSjGJ7ArtHGuvW",
-          "name": "OpenAi account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "schemaType": "manual",
-        "inputSchema": "{\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"required\": [\n    \"range\",\n    \"events\",\n    \"locations\",\n    \"npcs\",\n    \"info_learned\",\n    \"combat\",\n    \"decisions\",\n    \"character_moments\",\n    \"loose_threads\",\n    \"inventory_rewards\"\n  ],\n  \"properties\": {\n    \"range\": { \"type\": \"string\" },\n    \"events\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\"text\"],\n        \"properties\": { \"text\": { \"type\": \"string\" } }\n      }\n    },\n    \"locations\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\"name\", \"notes\"],\n        \"properties\": {\n          \"name\": { \"type\": \"string\" },\n          \"notes\": { \"type\": \"string\" }\n        }\n      }\n    },\n    \"npcs\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\"name\", \"notes\"],\n        \"properties\": {\n          \"name\": { \"type\": \"string\" },\n          \"notes\": { \"type\": \"string\" }\n        }\n      }\n    },\n    \"info_learned\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\"text\"],\n        \"properties\": { \"text\": { \"type\": \"string\" } }\n      }\n    },\n    \"combat\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\"text\"],\n        \"properties\": { \"text\": { \"type\": \"string\" } }\n      }\n    },\n    \"decisions\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\"text\"],\n        \"properties\": { \"text\": { \"type\": \"string\" } }\n      }\n    },\n    \"character_moments\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\"text\"],\n        \"properties\": { \"text\": { \"type\": \"string\" } }\n      }\n    },\n    \"loose_threads\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\"text\"],\n        \"properties\": { \"text\": { \"type\": \"string\" } }\n      }\n    },\n    \"inventory_rewards\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\"text\"],\n        \"properties\": { \"text\": { \"type\": \"string\" } }\n      }\n    }\n  }\n}"
-      },
-      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
-      "typeVersion": 1.3,
-      "position": [
-        3000,
-        96
-      ],
-      "id": "d24c3dab-95c1-4238-aaba-f45d6521ba96",
-      "name": "Output Schema"
-    },
-    {
-      "parameters": {
-        "jsCode": "function normalize(str) {\n  return String(str || \"\")\n    .trim()\n    .toLowerCase()\n    .replace(/[.,!?;:]/g, \"\")\n    .replace(/\\s+/g, \" \");\n}\n\nfunction sortByRange(items) {\n  return [...items].sort((a, b) => {\n    const aStart = a._rangeStartSec ?? 0;\n    const bStart = b._rangeStartSec ?? 0;\n    return aStart - bStart;\n  });\n}\n\nfunction dedupeTextArray(items) {\n  const seen = new Set();\n  const result = [];\n\n  for (const entry of items) {\n    if (!entry?.text) continue;\n\n    const key = normalize(entry.text);\n    if (!seen.has(key)) {\n      seen.add(key);\n      result.push({ text: entry.text.trim() });\n    }\n  }\n\n  return result;\n}\n\nfunction mergeNamedObjects(items) {\n  const map = new Map();\n\n  for (const entry of items) {\n    if (!entry?.name) continue;\n\n    const key = normalize(entry.name);\n    const noteText = entry.notes?.trim();\n\n    if (!map.has(key)) {\n      map.set(key, {\n        name: entry.name.trim(),\n        notes: noteText ? [noteText] : []\n      });\n    } else {\n      const existing = map.get(key);\n\n      if (noteText) {\n        const alreadyExists = existing.notes.some(\n          n => normalize(n) === normalize(noteText)\n        );\n\n        if (!alreadyExists) {\n          existing.notes.push(noteText);\n        }\n      }\n    }\n  }\n\n  return Array.from(map.values());\n}\n\nfunction crossCategoryDedupe(primary, secondary) {\n  const secondarySet = new Set(\n    secondary\n      .filter(e => e?.text)\n      .map(e => normalize(e.text))\n  );\n\n  return primary.filter(e => e?.text && !secondarySet.has(normalize(e.text)));\n}\n\nconst aggregated = {\n  events: [],\n  locations: [],\n  npcs: [],\n  info_learned: [],\n  combat: [],\n  decisions: [],\n  character_moments: [],\n  loose_threads: [],\n  inventory_rewards: []\n};\n\n// --- Collect everything with range tracking ---\nfor (const item of items) {\n  const wrapper = item.json ?? {};\n\n  // Some nodes output { output: {...} }, some output {...}.\n  // Sometimes output can be a string if parsing failed, so guard it.\n  const maybeOutput = wrapper.output;\n  const data =\n    (maybeOutput && typeof maybeOutput === \"object\" && !Array.isArray(maybeOutput))\n      ? maybeOutput\n      : wrapper;\n\n  const rangeStartSec = wrapper.rangeStartSec ?? data.rangeStartSec ?? 0;\n  let rangeStart = wrapper.rangeStart ?? data.rangeStart ?? null;\n  let rangeEnd = wrapper.rangeEnd ?? data.rangeEnd ?? null;\n  \n  if ((!rangeStart || !rangeEnd) && typeof data.range === \"string\") {\n    const m = data.range.match(/^(\\d{2}:\\d{2}:\\d{2})\\s*[–-]\\s*(\\d{2}:\\d{2}:\\d{2})$/);\n    if (m) {\n      rangeStart = rangeStart ?? m[1];\n      rangeEnd = rangeEnd ?? m[2];\n    }\n  }\n  \n  for (const key of Object.keys(aggregated)) {\n    const arr = data[key];\n    if (!Array.isArray(arr)) continue;\n\n    for (const entry of arr) {\n      // entry should be an object; skip bad entries safely\n      if (!entry || typeof entry !== \"object\") continue;\n\n      aggregated[key].push({\n        ...entry,\n        _rangeStartSec: rangeStartSec,\n        _rangeStart: rangeStart,\n        _rangeEnd: rangeEnd\n      });\n    }\n  }\n}\n\n// --- Chronological ordering ---\nfor (const key of Object.keys(aggregated)) {\n  aggregated[key] = sortByRange(aggregated[key]);\n}\n\n// --- Deduplicate text-based categories ---\naggregated.events = dedupeTextArray(aggregated.events);\naggregated.info_learned = dedupeTextArray(aggregated.info_learned);\naggregated.combat = dedupeTextArray(aggregated.combat);\naggregated.decisions = dedupeTextArray(aggregated.decisions);\naggregated.character_moments = dedupeTextArray(aggregated.character_moments);\naggregated.loose_threads = dedupeTextArray(aggregated.loose_threads);\naggregated.inventory_rewards = dedupeTextArray(aggregated.inventory_rewards);\n\n// --- Cross-category dedupe (prevent same line appearing twice) ---\naggregated.decisions = crossCategoryDedupe(\n  aggregated.decisions,\n  aggregated.events\n);\n\naggregated.combat = crossCategoryDedupe(\n  aggregated.combat,\n  aggregated.events\n);\n\n// --- Merge named entities ---\naggregated.npcs = mergeNamedObjects(aggregated.npcs);\naggregated.locations = mergeNamedObjects(aggregated.locations);\n\nreturn [\n  {\n    json: {\n      allFacts: aggregated\n    }\n  }\n];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        3216,
-        -128
-      ],
-      "id": "541d2fa4-70bd-4f1b-8873-1ca32bebbc60",
-      "name": "Aggregate Facts"
-    },
-    {
-      "parameters": {
-        "model": {
-          "__rl": true,
-          "value": "gpt-5.2",
-          "mode": "list",
-          "cachedResultName": "gpt-5.2"
-        },
-        "builtInTools": {},
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1.3,
-      "position": [
-        3512,
-        96
-      ],
-      "id": "6a6db13b-4e8d-4a54-9e43-f737f05a6a6a",
-      "name": "GPT-5.2",
-      "credentials": {
-        "openAiApi": {
-          "id": "spVSjGJ7ArtHGuvW",
-          "name": "OpenAi account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "promptType": "define",
-        "text": "=Context (authoritative, may be empty):\n{{ $json.contextDump || \"\" }}\n\nTranscript chunk (authoritative):\nRange: {{ $json.rangeStart }}–{{ $json.rangeEnd }}\n{{ $json.chunkText }}\n\nTask:\nExtract structured facts that are explicitly supported by the transcript chunk.\n\nStrict rules:\n- Only include facts supported by the chunk text.\n- Do not invent events, outcomes, NPC identities, motives, or locations.\n- Exclude table talk, hypotheticals, jokes, rules discussion, and planning unless it clearly results in an in-fiction action or a party decision that happens in this chunk.\n- If uncertain, omit rather than guess.\n- Do not include quotes or timestamps in the output.\n- Output must be valid JSON that matches the required schema exactly.\n- Use arrays, even if empty.\n- Keep each entry short and specific.\n\nIf nothing factual occurred in this chunk, return empty arrays for everything.\n\nReturn JSON only.",
-        "hasOutputParser": true,
-        "messages": {
-          "messageValues": [
-            {
-              "message": "You extract structured, transcript-grounded facts from a TTRPG session chunk. You do not write prose notes. You do not invent events. Return valid JSON only."
-            }
-          ]
-        },
-        "batching": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.chainLlm",
-      "typeVersion": 1.9,
-      "position": [
-        2864,
-        -128
-      ],
-      "id": "9046df4c-f283-483e-b1ce-b7394eabb138",
-      "name": "Fact Extractor"
-    },
-    {
-      "parameters": {
-        "promptType": "define",
-        "text": "=Context (authoritative):\n{{ $json.contextDump || \"\" }}\n\nExtracted session facts (authoritative JSON):\n{{ JSON.stringify($json.allFacts, null, 2) }}\n\nTask:\nWrite clean, natural session notes like a player recap.\n\nRules:\n- Only use facts from the provided JSON.\n- Do not invent events.\n- Do not infer motives.\n- Do not add anything not present.\n- If a section has no entries, omit it.\n- Deduplicate implicitly.\n- Keep tone natural and readable.\n- Do NOT mention JSON, chunks, or transcripts.\n\nOutput Markdown:\n\n# Session Notes\n\n## Summary\nShort narrative recap.\n\n## Major Events\nChronological bullet list.\n\n## Locations\nName — what happened there.\n\n## NPCs\nName — who they are and why they matter.\n\n## Information Learned\nClues, lore, revelations.\n\n## Combat\nOpponents, notable moments, outcome.\n\n## Party Decisions\nDecisions affecting future events.\n\n## Character Moments\nRoleplay or reveals.\n\n## Loose Threads\nUnresolved questions.\n\n## Inventory / Rewards\nItems, money, conditions, level ups.",
-        "messages": {
-          "messageValues": [
-            {
-              "message": "You are a careful session chronicler for a tabletop RPG.\n\nYour job is to transform structured session facts into clear, natural player notes.\n\nYou must obey these rules strictly:\n\nACCURACY\n- Use only the provided facts.\n- Do not invent events.\n- Do not infer motives.\n- Do not add missing context.\n- If something is not in the facts, it does not exist.\n\nSTYLE\n- Write like a player’s session recap, not a report.\n- Use natural language.\n- Be concise but complete.\n- Avoid repetition.\n- Do not mention JSON, data structures, or extraction.\n\nINTERPRETATION\n- Do not reinterpret facts.\n- Do not merge separate events.\n- Do not change wording meaningfully.\n- You may rephrase for readability only.\n\nOMISSIONS\n- If a section has no information, omit it entirely.\n- Do not write placeholders like \"None.\"\n\nORDERING\n- Preserve chronological order when describing events.\n\nFAILSAFE\nIf the facts are empty or missing, output exactly:\n\"No session events detected.\"\n\nOUTPUT\nReturn only Markdown notes.\nNo commentary.\nNo explanation.\nNo metadata."
-            }
-          ]
-        },
-        "batching": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.chainLlm",
-      "typeVersion": 1.9,
-      "position": [
-        3440,
-        -128
-      ],
-      "id": "f73533fd-9b82-48d9-a014-c46f9cdd64ff",
-      "name": "Note Writer"
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "7ff5d516-c37a-4857-ad00-76dcdab82790",
-              "name": "contextDump",
-              "value": "# Campaign\n- CosmereRPG campaign set in Brandon Sanderson’s Stormlight Archive on Roshar.\n- Takes place around 1173, just before and into Words of Radiance.\n- The War of Reckoning on the Shattered Plains is ongoing.\n- The Knights Radiant have not publicly returned.\n- Current location: **Alethi Warcamps on the Shattered Plains (Dalinar Kholin’s camp)**\n# World Assumptions\n- Roshar experiences magical Highstorms.\n- Stormlight is magical energy stored in gemstones inside spheres.\n- Shardblades and Shardplate are legendary magical weapons.\n- Surgebinding exists but is rare and mysterious.\n- Heralds are widely considered myth or religious doctrine.\n# PCs (Correct Spellings)\n- Rinah\n- Kai (Kaimoku'ruunaki)\n- Tarra\n- Milo (Miloren)\n- Xilak (\"Xi\") – Parshman; new party member; friend of Kai\n# Party Status\n- Party successfully escorted caravan through the Unclaimed Hills.\n- Taszo-son-Clutio is deceased.\n- Kai swore to recover the **Honorblade of Talenel** and return it to Shinovar.\n- Party has established temporary lodging at **The Ornery Chull** in Dalinar’s warcamp.\n- Party recently helped stop escaped beasts at the Thaylen menagerie outside the camp.\n# Known NPCs\n\n## Taszo-son-Clutio (Deceased)\n- Shin Stone Shaman.\n- Believed the Alethi were transporting Herald Talenel.\n- Claimed bandits possessed the Honorblade.\n- Died during the highstorm attack.\n## Alethi (Dalinar’s Warcamp)\n- **Captain Bordin** — Thanked the party for their actions during the caravan attack; arranged lodging and food at the warcamp.\n- **Ellar (Sergeant)** — Confronted Taszo regarding the guarded wagon earlier in the journey.\n- **Prisoner (believed by Taszo to be Talenel)** — Transported with Alethi forces; considered delusional or blasphemous by soldiers.\n- **Brightness Bettani** — Warcamp scribe with access to records; directed the party toward the Devotary of the Mind when asked about Liss.\n## Warcamp Contacts\n- **Veb** — Thaylen owner of *The Ornery Chull*; currently hosting the party.\n- **Ryvlk** — Thaylen menagerie owner outside the camp; claims to have purchased a chicken from a Shin man staying at *The Red Rock Bud* in Highprince Aladar’s camp.\n## Bandit-Linked Individuals\n- **Veth (Deceased)** — Attacker during the highstorm; bore archaic Pralla glyph markings.\n- **Unidentified golden-skinned Iriali man** — Wielded spike-shaped Honorblade of Talenel during the highstorm; escaped into the storm with a Reshi woman.\n- **Unidentified Reshi woman** — Fled with the Iriali man during the storm.\n# Known Locations\n- Unclaimed Hills\n- Shattered Plains\n- **Kholin Warcamp** (current base of operations)\n- **The Ornery Chull** (party lodging)\n- **Devotary of the Mind** (lead connected to Liss)\n- **Highprince Aladar’s Warcamp**\n- **The Red Rock Bud** (gambling den in Aladar’s camp; Shin contact lead)\n- **Thaylen Menagerie outside the warcamp**\n# Ongoing Threads\n\n## The Honorblade of Talenel\n- Taszo believed the bandits had stolen it.\n- Seen during the highstorm wielded by an Iriali man.\n- Current whereabouts unknown.\n## The Archaic Pralla-Variant Glyph\n- Appeared as:\n  - Wrist tattoo on bandit\n  - Green facial markings on storm attackers\n  - Etched dagger recovered from Veth\n- Meaning and organization unknown.\n## The Guarded Wagon Prisoner\n- Believed by Taszo to be Herald Talenel.\n- Currently held somewhere in the Kholin warcamp temple complex.\n- Alethi soldiers consider him a delusional blasphemer.\n## Liss\n- Powerful ally hired by Taszo’s Stone Shaman brothers.\n- Leads:\n  - Brightness Bettani suggested the **Devotary of the Mind**\n  - Possible Shin contact at **The Red Rock Bud** in Aladar’s camp.\n## Shin Presence in the Warcamps\n- A Shin man is reportedly gambling at **The Red Rock Bud** in Highprince Aladar’s camp.\n- Possible connection to Liss or the Honorblade.\n# Political Context\n- Alethkar is divided into competing highprince warcamps on the Shattered Plains.\n- Dalinar Kholin’s camp is known for stricter discipline and adherence to codes.\n- Camp rumors suggest tensions escalating between **Highprince Sadeas and Dalinar**.\n- Highprince Aladar’s camp is now relevant due to the Shin lead.",
-              "type": "string"
-            }
-          ]
-        },
-        "includeOtherFields": true,
-        "options": {}
-      },
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        2192,
-        -128
-      ],
-      "id": "27f6f334-f792-49eb-b426-909f00ac0d58",
-      "name": "Campaign Context"
-    },
-    {
-      "parameters": {
-        "operation": "toText",
-        "sourceProperty": "text",
-        "options": {
-          "encoding": "utf8",
-          "fileName": "session_notes.md"
-        }
-      },
-      "type": "n8n-nodes-base.convertToFile",
-      "typeVersion": 1.1,
-      "position": [
-        3792,
-        -128
-      ],
-      "id": "95615f3d-c2f7-48a1-b9ed-5b2aa0267a35",
-      "name": "Output Markdown File"
-    }
-  ],
-  "pinData": {},
-  "connections": {
-    "Parse JSON": {
-      "main": [
-        [
-          {
-            "node": "Campaign Context",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Set Config": {
-      "main": [
-        [
-          {
-            "node": "Chunk Transcript",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Receive Transcript": {
-      "main": [
-        [
-          {
-            "node": "Parse JSON",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Chunk Transcript": {
-      "main": [
-        [
-          {
-            "node": "Fact Extractor",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "GPT-5.2 Low Effort": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "Fact Extractor",
-            "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Output Schema": {
-      "ai_outputParser": [
-        [
-          {
-            "node": "Fact Extractor",
-            "type": "ai_outputParser",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Aggregate Facts": {
-      "main": [
-        [
-          {
-            "node": "Note Writer",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "GPT-5.2": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "Note Writer",
-            "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Fact Extractor": {
-      "main": [
-        [
-          {
-            "node": "Aggregate Facts",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Campaign Context": {
-      "main": [
-        [
-          {
-            "node": "Set Config",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Note Writer": {
-      "main": [
-        [
-          {
-            "node": "Output Markdown File",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "active": true,
-  "settings": {
-    "executionOrder": "v1",
-    "binaryMode": "separate",
-    "availableInMCP": false,
-    "timeSavedMode": "fixed",
-    "timezone": "America/Los_Angeles",
-    "callerPolicy": "workflowsFromSameOwner"
-  },
-  "versionId": "858d38c3-340c-4bee-b224-1cd25751650c",
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "f61b1b92f09cffa9f11151f2c5e99c58f1ac96e7dedf6ddd0f5b8715541c3ad0"
-  },
-  "id": "OAX0xVAV92f8QWjx",
-  "tags": []
-}
-```
+- LLM pipeline: chunking → fact extraction → aggregation → note writing
+- Campaign context generation across sessions
+- These would slot in after the review step, adding a "Process" step before "Done"
+- The final download zip would then also include context.md and session notes
