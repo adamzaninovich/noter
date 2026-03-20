@@ -33,45 +33,34 @@ defmodule NoterWeb.CampaignLive.Index do
               id="campaign-form"
               phx-change="validate"
               phx-submit="save"
-              class="flex gap-3 items-end"
             >
-              <div class="flex-1">
-                <.input field={@form[:name]} type="text" placeholder="Campaign name" />
+              <div class="flex gap-3 items-center">
+                <div class="flex-1 [&_.fieldset]:mb-0">
+                  <.input field={@form[:name]} type="text" placeholder="Campaign name" />
+                </div>
+                <.button type="submit" class="btn btn-primary">
+                  Create
+                </.button>
               </div>
-              <.button type="submit" class="btn btn-primary">
-                Create
-              </.button>
             </.form>
           </div>
         </div>
 
-        <div id="campaigns" phx-update="stream" class="grid gap-4">
-          <div class={["text-center py-12 text-base-content/50", !@campaigns_empty? && "hidden"]}>
-            No campaigns yet. Create one above to get started.
-          </div>
-          <div
+        <div :if={@campaigns_empty?} class="text-center py-12 text-base-content/50">
+          No campaigns yet. Create one above to get started.
+        </div>
+        <div id="campaigns" phx-update="stream" class="flex flex-col gap-4">
+          <.link
             :for={{id, campaign} <- @streams.campaigns}
             id={id}
-            class="card bg-base-100 shadow-sm border border-base-300 hover:shadow-md transition-shadow"
+            navigate={~p"/campaigns/#{campaign.id}"}
+            class="flex items-center justify-between p-4 rounded-lg bg-base-100 border border-base-300 hover:border-primary/40 hover:bg-base-100/80 transition-all cursor-pointer group"
           >
-            <div class="card-body flex-row items-center justify-between">
-              <div>
-                <h2 class="card-title">
-                  <.link
-                    navigate={~p"/campaigns/#{campaign.id}"}
-                    class="hover:text-primary transition-colors"
-                  >
-                    {campaign.name}
-                  </.link>
-                </h2>
-              </div>
-              <div class="card-actions">
-                <.link navigate={~p"/campaigns/#{campaign.id}"} class="btn btn-sm btn-ghost">
-                  <.icon name="hero-chevron-right" class="size-5" />
-                </.link>
-              </div>
-            </div>
-          </div>
+            <span class="text-lg font-semibold group-hover:text-primary transition-colors">
+              {campaign.name}
+            </span>
+            <.icon name="hero-chevron-right" class="size-5 text-base-content/30 group-hover:text-primary transition-colors" />
+          </.link>
         </div>
       </div>
     </Layouts.app>
@@ -109,12 +98,12 @@ defmodule NoterWeb.CampaignLive.Index do
     campaign = Campaigns.get_campaign!(id)
     {:ok, _} = Campaigns.delete_campaign(campaign)
 
-    campaigns = Campaigns.list_campaigns()
+    remaining = Campaigns.list_campaigns()
 
     {:noreply,
      socket
      |> put_flash(:info, "Campaign deleted.")
-     |> assign(:campaigns_empty?, campaigns == [])
+     |> assign(:campaigns_empty?, remaining == [])
      |> stream_delete(:campaigns, campaign)}
   end
 end

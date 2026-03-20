@@ -20,6 +20,7 @@ defmodule NoterWeb.CampaignLive.Show do
      |> assign(:campaign, campaign)
      |> assign(:name_form, to_form(name_changeset))
      |> assign(:player_rows, player_rows)
+     |> assign(:editing_player_map, false)
      |> assign(:sessions_empty?, campaign.sessions == [])
      |> stream(:sessions, campaign.sessions)}
   end
@@ -40,11 +41,13 @@ defmodule NoterWeb.CampaignLive.Show do
         <div class="card bg-base-200 shadow-sm">
           <div class="card-body">
             <h2 class="card-title text-lg">Campaign Name</h2>
-            <.form for={@name_form} id="name-form" phx-submit="save_name" class="flex gap-3 items-end">
-              <div class="flex-1">
-                <.input field={@name_form[:name]} type="text" />
+            <.form for={@name_form} id="name-form" phx-submit="save_name">
+              <div class="flex gap-3 items-center">
+                <div class="flex-1 [&_.fieldset]:mb-0">
+                  <.input field={@name_form[:name]} type="text" />
+                </div>
+                <.button type="submit" class="btn btn-primary">Save</.button>
               </div>
-              <.button type="submit" class="btn btn-primary">Save</.button>
             </.form>
           </div>
         </div>
@@ -52,72 +55,132 @@ defmodule NoterWeb.CampaignLive.Show do
         <%!-- Player Map Section --%>
         <div class="card bg-base-200 shadow-sm">
           <div class="card-body">
-            <h2 class="card-title text-lg">Player Map</h2>
-            <p class="text-sm text-base-content/60">
-              Map Discord usernames to character names for transcript processing.
-            </p>
-
-            <div class="overflow-x-auto mt-2">
-              <table class="table" id="player-map-table">
-                <thead>
-                  <tr>
-                    <th>Discord Name</th>
-                    <th>Character Name</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <%= if @player_rows == [] do %>
-                    <tr>
-                      <td colspan="3" class="text-center text-base-content/50 py-6">
-                        No players added yet.
-                      </td>
-                    </tr>
-                  <% end %>
-                  <tr :for={row <- @player_rows} id={"player-row-#{row.id}"}>
-                    <td>
-                      <input
-                        type="text"
-                        value={row.discord}
-                        name={"player[#{row.id}][discord]"}
-                        placeholder="Discord username"
-                        class="input input-bordered input-sm w-full"
-                        form="player-map-form"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={row.character}
-                        name={"player[#{row.id}][character]"}
-                        placeholder="Character name"
-                        class="input input-bordered input-sm w-full"
-                        form="player-map-form"
-                      />
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        phx-click="remove_player"
-                        phx-value-id={row.id}
-                        class="btn btn-ghost btn-sm btn-square text-error"
-                      >
-                        <.icon name="hero-x-mark" class="size-4" />
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div class="flex items-center justify-between">
+              <div>
+                <h2 class="card-title text-lg">Player Map</h2>
+                <p class="text-sm text-base-content/60">
+                  Map Discord usernames to character names for transcript processing.
+                </p>
+              </div>
+              <%= if !@editing_player_map do %>
+                <button type="button" phx-click="edit_player_map" class="btn btn-sm btn-ghost">
+                  <.icon name="hero-pencil-square" class="size-4" /> Edit
+                </button>
+              <% end %>
             </div>
 
-            <div class="flex gap-2 mt-2">
-              <button type="button" phx-click="add_player" class="btn btn-sm btn-outline">
-                <.icon name="hero-plus" class="size-4" /> Add Player
-              </button>
-              <form id="player-map-form" phx-submit="save_player_map">
-                <.button type="submit" class="btn btn-sm btn-primary">Save Player Map</.button>
-              </form>
-            </div>
+            <%= if @editing_player_map do %>
+              <.form for={%{}} id="player-map-form" phx-change="update_players" phx-submit="save_player_map">
+                <div class="overflow-x-auto rounded-box border border-base-content/5 bg-base-100 mt-2">
+                  <table class="table" id="player-map-table">
+                    <thead>
+                      <tr>
+                        <th>Discord Name</th>
+                        <th>Character Name</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <%= if @player_rows == [] do %>
+                        <tr>
+                          <td colspan="3" class="text-center text-base-content/50 py-6">
+                            No players added yet.
+                          </td>
+                        </tr>
+                      <% end %>
+                      <tr :for={row <- @player_rows} id={"player-row-#{row.id}"}>
+                        <td>
+                          <input
+                            type="text"
+                            value={row.discord}
+                            name={"player[#{row.id}][discord]"}
+                            placeholder="Discord username"
+                            class="input input-bordered input-sm w-full"
+                            id={"player-discord-#{row.id}"}
+                            phx-hook=".PlayerInput"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={row.character}
+                            name={"player[#{row.id}][character]"}
+                            placeholder="Character name"
+                            class="input input-bordered input-sm w-full"
+                            id={"player-character-#{row.id}"}
+                            phx-hook=".PlayerInput"
+                          />
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            phx-click="remove_player"
+                            phx-value-id={row.id}
+                            class="btn btn-ghost btn-sm btn-square text-error"
+                          >
+                            <.icon name="hero-x-mark" class="size-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="flex gap-2 mt-2">
+                  <button type="button" phx-click="add_player" class="btn btn-sm btn-outline">
+                    <.icon name="hero-plus" class="size-4" /> Add Player
+                  </button>
+                  <.button type="submit" class="btn btn-sm btn-primary">Save</.button>
+                  <button type="button" phx-click="cancel_edit_player_map" class="btn btn-sm btn-ghost">
+                    Cancel
+                  </button>
+                </div>
+              </.form>
+              <script :type={Phoenix.LiveView.ColocatedHook} name=".PlayerInput">
+                export default {
+                  mounted() {
+                    this.el.addEventListener("keydown", (e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        this.pushEvent("add_player", {}, (reply) => {
+                          requestAnimationFrame(() => {
+                            const table = this.el.closest("table")
+                            const lastRow = table.querySelector("tbody tr:last-child")
+                            if (lastRow) {
+                              const firstInput = lastRow.querySelector("input")
+                              if (firstInput) firstInput.focus()
+                            }
+                          })
+                        })
+                      }
+                    })
+                  }
+                }
+              </script>
+            <% else %>
+              <%= if @campaign.player_map == %{} do %>
+                <div class="text-center py-6 text-base-content/50">
+                  No players mapped yet.
+                </div>
+              <% else %>
+                <div class="overflow-x-auto rounded-box border border-base-content/5 bg-base-100 mt-2">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th>Discord Name</th>
+                        <th>Character Name</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr :for={{discord, character} <- @campaign.player_map}>
+                        <td class="font-mono">{discord}</td>
+                        <td>{character}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              <% end %>
+            <% end %>
           </div>
         </div>
 
@@ -200,9 +263,46 @@ defmodule NoterWeb.CampaignLive.Show do
     end
   end
 
+  def handle_event("edit_player_map", _params, socket) do
+    {:noreply, assign(socket, editing_player_map: true)}
+  end
+
+  def handle_event("cancel_edit_player_map", _params, socket) do
+    # Reset rows from saved campaign data
+    player_rows =
+      socket.assigns.campaign.player_map
+      |> Enum.map(fn {discord, character} ->
+        %{id: System.unique_integer([:positive]), discord: discord, character: character}
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:editing_player_map, false)
+     |> assign(:player_rows, player_rows)}
+  end
+
+  def handle_event("update_players", %{"player" => player_params}, socket) do
+    rows =
+      Enum.map(socket.assigns.player_rows, fn row ->
+        case Map.get(player_params, to_string(row.id)) do
+          %{"discord" => discord, "character" => character} ->
+            %{row | discord: discord, character: character}
+
+          _ ->
+            row
+        end
+      end)
+
+    {:noreply, assign(socket, player_rows: rows)}
+  end
+
+  def handle_event("update_players", _params, socket) do
+    {:noreply, socket}
+  end
+
   def handle_event("add_player", _params, socket) do
     new_row = %{id: System.unique_integer([:positive]), discord: "", character: ""}
-    {:noreply, assign(socket, player_rows: socket.assigns.player_rows ++ [new_row])}
+    {:reply, %{}, assign(socket, player_rows: socket.assigns.player_rows ++ [new_row])}
   end
 
   def handle_event("remove_player", %{"id" => id}, socket) do
@@ -232,7 +332,8 @@ defmodule NoterWeb.CampaignLive.Show do
          socket
          |> put_flash(:info, "Player map saved.")
          |> assign(:campaign, campaign)
-         |> assign(:player_rows, player_rows)}
+         |> assign(:player_rows, player_rows)
+         |> assign(:editing_player_map, false)}
 
       {:error, changeset} ->
         {:noreply,
@@ -252,7 +353,8 @@ defmodule NoterWeb.CampaignLive.Show do
          socket
          |> put_flash(:info, "Player map saved.")
          |> assign(:campaign, campaign)
-         |> assign(:player_rows, [])}
+         |> assign(:player_rows, [])
+         |> assign(:editing_player_map, false)}
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to save player map.")}

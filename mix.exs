@@ -63,7 +63,8 @@ defmodule Noter.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      {:req, "~> 0.5"}
+      {:req, "~> 0.5"},
+      {:tidewave, "~> 0.5", only: :dev}
     ]
   end
 
@@ -86,7 +87,8 @@ defmodule Noter.MixProject do
         "esbuild noter --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"],
+      s: ["phx.server"]
     ]
   end
 end
