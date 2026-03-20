@@ -17,7 +17,8 @@ defmodule NoterWeb.Router do
   scope "/", NoterWeb do
     pipe_through :browser
 
-    # Phase 1 will add campaign LiveView routes here
+    live "/", CampaignLive.Index
+    live "/campaigns/:id", CampaignLive.Show
   end
 
   # Other scopes may use custom stacks.
