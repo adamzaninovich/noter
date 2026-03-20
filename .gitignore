@@ -42,3 +42,4 @@ npm-debug.log
 # Local secrets
 .env
 
+/priv/uploads

@@ -16,6 +16,12 @@ defmodule Noter.Campaigns do
     |> Repo.preload(sessions: from(s in Noter.Sessions.Session, order_by: [desc: s.inserted_at]))
   end
 
+  def get_campaign_by_slug!(slug) do
+    Campaign
+    |> Repo.get_by!(slug: slug)
+    |> Repo.preload(sessions: from(s in Noter.Sessions.Session, order_by: [desc: s.inserted_at]))
+  end
+
   def create_campaign(attrs) do
     %Campaign{}
     |> Campaign.changeset(attrs)

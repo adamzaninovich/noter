@@ -21,6 +21,28 @@ defmodule Noter.Sessions do
     |> Repo.insert()
   end
 
+  def update_session(%Session{} = session, attrs) do
+    session
+    |> Session.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def get_session_with_campaign!(id) do
+    Session
+    |> Repo.get!(id)
+    |> Repo.preload(:campaign)
+  end
+
+  def get_session_by_slug!(campaign_id, slug) do
+    Session
+    |> Repo.get_by!(campaign_id: campaign_id, slug: slug)
+    |> Repo.preload(:campaign)
+  end
+
+  def delete_session(%Session{} = session) do
+    Repo.delete(session)
+  end
+
   def change_session(%Session{} = session, attrs \\ %{}) do
     Session.changeset(session, attrs)
   end

@@ -4,6 +4,7 @@ defmodule Noter.Campaigns.Campaign do
 
   schema "campaigns" do
     field :name, :string
+    field :slug, :string
     field :player_map, :map, default: %{}
 
     has_many :sessions, Noter.Sessions.Session
@@ -15,5 +16,23 @@ defmodule Noter.Campaigns.Campaign do
     campaign
     |> cast(attrs, [:name, :player_map])
     |> validate_required([:name])
+    |> generate_slug()
+    |> unique_constraint(:slug)
+  end
+
+  defp generate_slug(changeset) do
+    case get_change(changeset, :name) do
+      nil -> changeset
+      name -> put_change(changeset, :slug, slugify(name))
+    end
+  end
+
+  defp slugify(name) do
+    name
+    |> String.downcase()
+    |> String.replace(~r/[^\w\s-]/u, "")
+    |> String.replace(~r/[\s_]+/, "-")
+    |> String.replace(~r/-+/, "-")
+    |> String.trim("-")
   end
 end

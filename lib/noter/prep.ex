@@ -41,6 +41,29 @@ defmodule Noter.Prep do
   end
 
   @doc """
+  Renames FLAC files from `source_dir` into `output_dir` using the player map.
+
+  Copies each FLAC with its character name (or original username if unmatched).
+  Returns `{:ok, [{original_basename, character_name}]}`.
+  """
+  def rename_flacs(source_dir, output_dir, player_map) do
+    File.mkdir_p!(output_dir)
+
+    results =
+      source_dir
+      |> find_flac_files()
+      |> Enum.map(fn path ->
+        basename = Path.basename(path, ".flac")
+        character_name = resolve_character(basename, player_map)
+        dest = Path.join(output_dir, "#{character_name}.flac")
+        File.cp!(path, dest)
+        {basename, character_name}
+      end)
+
+    {:ok, results}
+  end
+
+  @doc """
   Clips an audio file to the given start/end timestamps using ffmpeg.
 
   `start_ts` and `end_ts` are strings in "HH:MM:SS" or seconds format.

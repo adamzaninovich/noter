@@ -18,7 +18,9 @@ defmodule NoterWeb.Router do
     pipe_through :browser
 
     live "/", CampaignLive.Index
-    live "/campaigns/:id", CampaignLive.Show
+    live "/campaigns/:campaign_slug", CampaignLive.Show
+    live "/campaigns/:campaign_slug/sessions/new", SessionLive.New
+    live "/campaigns/:campaign_slug/sessions/:session_slug", SessionLive.Show
   end
 
   # Other scopes may use custom stacks.

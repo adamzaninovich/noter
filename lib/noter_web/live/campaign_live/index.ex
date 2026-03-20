@@ -53,13 +53,16 @@ defmodule NoterWeb.CampaignLive.Index do
           <.link
             :for={{id, campaign} <- @streams.campaigns}
             id={id}
-            navigate={~p"/campaigns/#{campaign.id}"}
+            navigate={~p"/campaigns/#{campaign.slug}"}
             class="flex items-center justify-between p-4 rounded-lg bg-base-100 border border-base-300 hover:border-primary/40 hover:bg-base-100/80 transition-all cursor-pointer group"
           >
             <span class="text-lg font-semibold group-hover:text-primary transition-colors">
               {campaign.name}
             </span>
-            <.icon name="hero-chevron-right" class="size-5 text-base-content/30 group-hover:text-primary transition-colors" />
+            <.icon
+              name="hero-chevron-right"
+              class="size-5 text-base-content/30 group-hover:text-primary transition-colors"
+            />
           </.link>
         </div>
       </div>
