@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(mix:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:daisyui.com)"
+    ]
+  }
+}
