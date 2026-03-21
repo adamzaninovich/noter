@@ -26,8 +26,9 @@ defmodule Noter.Sessions.Session do
     |> validate_required([:name, :status])
     |> validate_inclusion(:status, @valid_statuses)
     |> generate_slug()
+    |> validate_required([:slug], message: "name must contain at least one letter or number")
     |> unique_constraint([:campaign_id, :slug],
-      message: "a session with this name already exists in this campaign"
+      message: "a session with a similar name already exists in this campaign"
     )
   end
 

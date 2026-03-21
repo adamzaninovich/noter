@@ -96,17 +96,4 @@ defmodule NoterWeb.CampaignLive.Index do
         {:noreply, assign(socket, form: to_form(changeset))}
     end
   end
-
-  def handle_event("delete", %{"id" => id}, socket) do
-    campaign = Campaigns.get_campaign!(id)
-    {:ok, _} = Campaigns.delete_campaign(campaign)
-
-    remaining = Campaigns.list_campaigns()
-
-    {:noreply,
-     socket
-     |> put_flash(:info, "Campaign deleted.")
-     |> assign(:campaigns_empty?, remaining == [])
-     |> stream_delete(:campaigns, campaign)}
-  end
 end

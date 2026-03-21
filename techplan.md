@@ -2,7 +2,7 @@
 
 See PLAN.md for full feature spec and data model.
 
-## Phase 1 — Data Model & Campaign CRUD
+## Phase 1 — Data Model & Campaign CRUD ✅
 
 DB schemas, context modules, and campaign management UI.
 
@@ -15,7 +15,7 @@ DB schemas, context modules, and campaign management UI.
 - Routes: `/ → campaigns`, `/campaigns/:id`
 - Wire up the home page route to the campaign list
 
-## Phase 2 — File Upload & Rename
+## Phase 2 — File Upload & Rename ✅
 
 Session creation, file uploads, FLAC extraction and renaming.
 
@@ -23,6 +23,7 @@ Session creation, file uploads, FLAC extraction and renaming.
 - Upload step: `allow_upload` for zip, AAC, vocab.txt (large file limits for audio)
 - On upload complete: extract zip, rename FLACs using campaign player map (reuse `Prep` logic)
 - Store files under `priv/uploads/<session_id>/`
+- **TODO**: `Uploads.session_dir/1` uses `Application.app_dir(:noter, "priv")` which resolves inside the release bundle. Before deploying, move upload storage to a configurable path outside the release (e.g. an env-driven `NOTER_UPLOADS_DIR`).
 - Show uploaded file list with character name mapping
 - Transition session status `uploading → uploaded`
 - Route: `/campaigns/:campaign_id/sessions/new` and `/campaigns/:campaign_id/sessions/:id`
@@ -34,9 +35,10 @@ Waveform UI for setting trim points, ffmpeg clipping.
 - Install wavesurfer.js (npm in assets/)
 - `phx-hook` for waveform player — load merged AAC, region selection for start/end
 - Push trim timestamps to server via `phx-submit` or `pushEvent`
-- Server: store `trim_start_seconds` / `trim_end_seconds` on session
-- On confirm: run ffmpeg to clip all FLACs and convert merged AAC → M4A
+- Server: store `trim_start_seconds` / `trim_end_seconds` on session (add to `Session.changeset` cast)
+- On confirm: run ffmpeg to clip all FLACs and convert merged AAC → M4A (wire up existing `Prep.clip_and_rename/5`)
 - Store trimmed files under `priv/uploads/<session_id>/trimmed/`
+- Serve merged AAC via a controller/plug endpoint so wavesurfer can load it
 - Transition session status `uploaded → trimmed`
 
 ## Phase 4 — Transcription Service Integration

@@ -355,36 +355,47 @@ defmodule NoterWeb.CampaignLive.Show do
   end
 
   def handle_event("save_player_map", %{"player" => player_params}, socket) do
-    player_map =
+    entries =
       player_params
       |> Map.values()
       |> Enum.reject(fn %{"discord" => d, "character" => c} -> d == "" and c == "" end)
-      |> Map.new(fn %{"discord" => discord, "character" => character} -> {discord, character} end)
 
-    case Campaigns.update_campaign(socket.assigns.campaign, %{player_map: player_map}) do
-      {:ok, campaign} ->
-        campaign = Campaigns.get_campaign!(campaign.id)
+    discord_names = Enum.map(entries, & &1["discord"])
+    duplicates = discord_names -- Enum.uniq(discord_names)
 
-        player_rows =
-          campaign.player_map
-          |> Enum.map(fn {discord, character} ->
-            %{id: System.unique_integer([:positive]), discord: discord, character: character}
-          end)
+    if duplicates != [] do
+      {:noreply,
+       socket
+       |> put_flash(:error, "Duplicate Discord name: #{Enum.uniq(duplicates) |> Enum.join(", ")}")
+       |> assign(:settings_open?, true)}
+    else
+      player_map = Map.new(entries, fn %{"discord" => d, "character" => c} -> {d, c} end)
 
-        {:noreply,
-         socket
-         |> put_flash(:info, "Player map saved.")
-         |> assign(:campaign, campaign)
-         |> assign(:player_rows, player_rows)
-         |> assign(:editing_player_map, false)
-         |> assign(:settings_open?, true)}
+      case Campaigns.update_campaign(socket.assigns.campaign, %{player_map: player_map}) do
+        {:ok, campaign} ->
+          campaign = Campaigns.get_campaign!(campaign.id)
 
-      {:error, changeset} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Failed to save player map.")
-         |> assign(:name_form, to_form(changeset))
-         |> assign(:settings_open?, true)}
+          player_rows =
+            campaign.player_map
+            |> Enum.map(fn {discord, character} ->
+              %{id: System.unique_integer([:positive]), discord: discord, character: character}
+            end)
+
+          {:noreply,
+           socket
+           |> put_flash(:info, "Player map saved.")
+           |> assign(:campaign, campaign)
+           |> assign(:player_rows, player_rows)
+           |> assign(:editing_player_map, false)
+           |> assign(:settings_open?, true)}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, "Failed to save player map.")
+           |> assign(:name_form, to_form(changeset))
+           |> assign(:settings_open?, true)}
+      end
     end
   end
 
@@ -408,7 +419,13 @@ defmodule NoterWeb.CampaignLive.Show do
   end
 
   def handle_event("delete_campaign", _params, socket) do
-    {:ok, _} = Campaigns.delete_campaign(socket.assigns.campaign)
+    campaign = socket.assigns.campaign
+
+    for session <- campaign.sessions do
+      File.rm_rf(Noter.Uploads.session_dir(session.id))
+    end
+
+    {:ok, _} = Campaigns.delete_campaign(campaign)
 
     {:noreply,
      socket

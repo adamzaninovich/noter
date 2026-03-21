@@ -17,7 +17,8 @@ defmodule Noter.Campaigns.Campaign do
     |> cast(attrs, [:name, :player_map])
     |> validate_required([:name])
     |> generate_slug()
-    |> unique_constraint(:slug)
+    |> validate_required([:slug], message: "name must contain at least one letter or number")
+    |> unique_constraint(:slug, message: "a campaign with a similar name already exists")
   end
 
   defp generate_slug(changeset) do

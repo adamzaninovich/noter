@@ -3,6 +3,7 @@ defmodule NoterWeb.SessionLive.Show do
 
   alias Noter.Sessions
   alias Noter.Uploads
+  import NoterWeb.SessionLive.UploadHelpers
 
   @steps [
     {"uploaded", "Upload"},
@@ -18,6 +19,7 @@ defmodule NoterWeb.SessionLive.Show do
     session = Sessions.get_session_by_slug!(campaign.id, session_slug)
 
     renamed_files = Uploads.list_renamed_files(session.id)
+    session_dir = Uploads.session_dir(session.id)
 
     socket =
       socket
@@ -25,7 +27,10 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:session, session)
       |> assign(:campaign, session.campaign)
       |> assign(:renamed_files, renamed_files)
+      |> assign(:has_aac?, File.exists?(Path.join(session_dir, "merged.aac")))
+      |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
       |> assign(:steps, @steps)
+      |> assign(:processing?, false)
 
     socket =
       if session.status == "uploading" do
@@ -83,8 +88,20 @@ defmodule NoterWeb.SessionLive.Show do
           <% end %>
         </ul>
 
+        <%!-- Processing spinner --%>
+        <%= if @processing? do %>
+          <div class="card bg-base-200 shadow-sm">
+            <div class="card-body">
+              <div class="flex flex-col items-center py-8 gap-4">
+                <span class="loading loading-spinner loading-lg text-primary"></span>
+                <p class="text-base-content/70">Processing uploaded files...</p>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
         <%!-- Upload form when status is "uploading" --%>
-        <%= if @session.status == "uploading" do %>
+        <%= if @session.status == "uploading" and not @processing? do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <h2 class="card-title text-lg">Upload Files</h2>
@@ -176,14 +193,8 @@ defmodule NoterWeb.SessionLive.Show do
               <% end %>
 
               <div class="flex gap-4 mt-3 text-sm text-base-content/60">
-                <.file_indicator
-                  label="Merged Audio"
-                  exists?={File.exists?(Path.join(Uploads.session_dir(@session.id), "merged.aac"))}
-                />
-                <.file_indicator
-                  label="Vocabulary"
-                  exists?={File.exists?(Path.join(Uploads.session_dir(@session.id), "vocab.txt"))}
-                />
+                <.file_indicator label="Merged Audio" exists?={@has_aac?} />
+                <.file_indicator label="Vocabulary" exists?={@has_vocab?} />
               </div>
             </div>
           </div>
@@ -212,38 +223,6 @@ defmodule NoterWeb.SessionLive.Show do
     </Layouts.app>
     """
   end
-
-  defp upload_entries(assigns) do
-    ~H"""
-    <div :for={entry <- @entries} class="flex items-center gap-3">
-      <div class="flex-1">
-        <div class="flex items-center justify-between text-sm mb-1">
-          <span class="truncate max-w-xs">{entry.client_name}</span>
-          <button
-            type="button"
-            phx-click="cancel-upload"
-            phx-value-ref={entry.ref}
-            phx-value-upload-ref={@upload_ref}
-            class="btn btn-ghost btn-xs"
-          >
-            <.icon name="hero-x-mark" class="size-4" />
-          </button>
-        </div>
-        <progress class="progress progress-primary w-full" value={entry.progress} max="100">
-          {entry.progress}%
-        </progress>
-        <div :for={err <- upload_errors(@upload, entry)} class="text-error text-sm mt-1">
-          {upload_error_to_string(err)}
-        </div>
-      </div>
-    </div>
-    """
-  end
-
-  defp upload_error_to_string(:too_large), do: "File is too large"
-  defp upload_error_to_string(:not_accepted), do: "File type not accepted"
-  defp upload_error_to_string(:too_many_files), do: "Too many files"
-  defp upload_error_to_string(err), do: "Upload error: #{inspect(err)}"
 
   defp file_indicator(assigns) do
     ~H"""
@@ -279,41 +258,42 @@ defmodule NoterWeb.SessionLive.Show do
 
   @impl true
   def handle_event("cancel-upload", %{"ref" => ref, "upload-ref" => upload_ref}, socket) do
-    upload_name =
-      case upload_ref do
-        r when r == socket.assigns.uploads.zip_file.ref -> :zip_file
-        r when r == socket.assigns.uploads.aac_file.ref -> :aac_file
-        r when r == socket.assigns.uploads.vocab_file.ref -> :vocab_file
-      end
-
-    {:noreply, cancel_upload(socket, upload_name, ref)}
+    {:noreply, cancel_upload_by_ref(socket, ref, upload_ref)}
   end
 
   def handle_event("upload", _params, socket) do
-    session = socket.assigns.session
-    campaign = socket.assigns.campaign
+    if socket.assigns.uploads.zip_file.entries == [] do
+      {:noreply, put_flash(socket, :error, "A ZIP file is required.")}
+    else
+      session = socket.assigns.session
+      campaign = socket.assigns.campaign
 
-    [zip_path] = consume_uploaded_entries(socket, :zip_file, &consume_to_tmp/2)
+      zip_paths = consume_uploaded_entries(socket, :zip_file, &consume_to_tmp/2)
+      aac_paths = consume_uploaded_entries(socket, :aac_file, &consume_to_tmp/2)
+      vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
 
-    aac_paths = consume_uploaded_entries(socket, :aac_file, &consume_to_tmp/2)
-    aac_path = List.first(aac_paths)
+      lv = self()
 
-    vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
-    vocab_path = List.first(vocab_paths)
+      Task.start(fn ->
+        result =
+          case Uploads.process_uploads(
+                 session,
+                 campaign,
+                 List.first(zip_paths),
+                 List.first(aac_paths),
+                 List.first(vocab_paths)
+               ) do
+            {:ok, _renamed} ->
+              Sessions.update_session(session, %{status: "uploaded"})
 
-    case Uploads.process_uploads(session, campaign, zip_path, aac_path, vocab_path) do
-      {:ok, _renamed} ->
-        {:ok, session} = Sessions.update_session(session, %{status: "uploaded"})
-        renamed_files = Uploads.list_renamed_files(session.id)
+            {:error, reason} ->
+              {:error, reason}
+          end
 
-        {:noreply,
-         socket
-         |> assign(:session, session)
-         |> assign(:renamed_files, renamed_files)
-         |> put_flash(:info, "Files uploaded and processed.")}
+        send(lv, {:upload_processed, result})
+      end)
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "File processing failed: #{reason}")}
+      {:noreply, assign(socket, :processing?, true)}
     end
   end
 
@@ -321,7 +301,6 @@ defmodule NoterWeb.SessionLive.Show do
     session = socket.assigns.session
     campaign = socket.assigns.campaign
 
-    # Clean up uploaded files
     File.rm_rf(Uploads.session_dir(session.id))
     {:ok, _} = Sessions.delete_session(session)
 
@@ -331,11 +310,25 @@ defmodule NoterWeb.SessionLive.Show do
      |> push_navigate(to: ~p"/campaigns/#{campaign.slug}")}
   end
 
-  defp consume_to_tmp(meta, entry) do
-    tmp_path =
-      Path.join(System.tmp_dir!(), "noter-upload-#{entry.uuid}#{Path.extname(entry.client_name)}")
+  @impl true
+  def handle_info({:upload_processed, {:ok, session}}, socket) do
+    renamed_files = Uploads.list_renamed_files(session.id)
+    session_dir = Uploads.session_dir(session.id)
 
-    File.cp!(meta.path, tmp_path)
-    {:ok, tmp_path}
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:renamed_files, renamed_files)
+     |> assign(:has_aac?, File.exists?(Path.join(session_dir, "merged.aac")))
+     |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
+     |> assign(:processing?, false)
+     |> put_flash(:info, "Files uploaded and processed.")}
+  end
+
+  def handle_info({:upload_processed, {:error, reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:processing?, false)
+     |> put_flash(:error, "File processing failed: #{reason}")}
   end
 end
