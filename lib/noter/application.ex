@@ -14,8 +14,8 @@ defmodule Noter.Application do
        repos: Application.fetch_env!(:noter, :ecto_repos), skip: skip_migrations?()},
       {DNSCluster, query: Application.get_env(:noter, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Noter.PubSub},
-      # Start a worker by calling: Noter.Worker.start_link(arg)
-      # {Noter.Worker, arg},
+      {Registry, keys: :unique, name: Noter.TranscriptionRegistry},
+      {DynamicSupervisor, name: Noter.TranscriptionSupervisor, strategy: :one_for_one},
       # Start to serve requests, typically the last entry
       NoterWeb.Endpoint
     ]

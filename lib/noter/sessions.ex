@@ -27,6 +27,12 @@ defmodule Noter.Sessions do
     |> Repo.update()
   end
 
+  def update_transcription(%Session{} = session, attrs) do
+    session
+    |> Session.transcription_changeset(attrs)
+    |> Repo.update()
+  end
+
   def get_session_with_campaign!(id) do
     Session
     |> Repo.get!(id)

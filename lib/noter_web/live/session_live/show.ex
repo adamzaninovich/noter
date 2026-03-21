@@ -3,6 +3,7 @@ defmodule NoterWeb.SessionLive.Show do
 
   alias Noter.Sessions
   alias Noter.Uploads
+  alias Noter.Transcription
   import NoterWeb.SessionLive.UploadHelpers
 
   @steps [
@@ -35,8 +36,12 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:generating_peaks?, false)
       |> assign(:trim_start, session.trim_start_seconds)
       |> assign(:trim_end, session.trim_end_seconds)
+      |> assign(:transcribing?, false)
+      |> assign(:transcription_progress, nil)
+      |> assign(:transcription_status, nil)
       |> assign_audio_urls(session)
       |> retry_peaks_if_needed(session)
+      |> reconnect_transcription(session)
 
     socket =
       if session.status == "uploading" do
@@ -284,6 +289,81 @@ defmodule NoterWeb.SessionLive.Show do
                 <span class="loading loading-spinner loading-lg text-primary"></span>
                 <p class="text-base-content/70">Trimming audio files...</p>
               </div>
+            </div>
+          </div>
+        <% end %>
+
+        <%!-- Transcription card --%>
+        <%= if @session.status == "trimmed" and not @transcribing? do %>
+          <div class="card bg-base-200 shadow-sm">
+            <div class="card-body">
+              <h2 class="card-title text-lg">Transcription</h2>
+              <p class="text-sm text-base-content/60">
+                Send trimmed audio files to the transcription service.
+              </p>
+              <div class="flex justify-end mt-2">
+                <button
+                  id="start-transcription-btn"
+                  phx-click="start_transcription"
+                  class="btn btn-primary"
+                  phx-disable-with="Submitting..."
+                >
+                  Start Transcription
+                </button>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
+        <%!-- Transcription progress --%>
+        <%= if @transcribing? do %>
+          <div class="card bg-base-200 shadow-sm">
+            <div class="card-body">
+              <h2 class="card-title text-lg">Transcription in Progress</h2>
+              <%= if @transcription_progress do %>
+                <div class="space-y-3 mt-2">
+                  <div class="flex items-center justify-between text-sm">
+                    <span class="text-base-content/70">
+                      Transcribing:
+                      <span class="font-medium text-base-content">
+                        {@transcription_progress.file}
+                      </span>
+                    </span>
+                    <span class="font-mono">
+                      <%= if @transcription_progress.file_pct > 0 do %>
+                        {Float.round(@transcription_progress.file_pct * 1.0, 1)}%
+                      <% end %>
+                    </span>
+                  </div>
+                  <div>
+                    <div class="text-xs text-base-content/60 mb-1">Current file</div>
+                    <progress
+                      class="progress progress-primary w-full"
+                      value={
+                        if(@transcription_progress.file_pct > 0, do: @transcription_progress.file_pct)
+                      }
+                      max="100"
+                    >
+                    </progress>
+                  </div>
+                  <div>
+                    <div class="text-xs text-base-content/60 mb-1">Overall</div>
+                    <progress
+                      class="progress progress-accent w-full"
+                      value={@transcription_progress.overall_pct}
+                      max="100"
+                    >
+                    </progress>
+                  </div>
+                </div>
+              <% else %>
+                <div class="flex flex-col items-center py-8 gap-4">
+                  <span class="loading loading-spinner loading-lg text-primary"></span>
+                  <p class="text-base-content/70">
+                    {transcription_wait_message(@transcription_status)}
+                  </p>
+                </div>
+              <% end %>
             </div>
           </div>
         <% end %>
@@ -543,6 +623,10 @@ defmodule NoterWeb.SessionLive.Show do
     current_idx >= step_idx
   end
 
+  defp transcription_wait_message(:uploading), do: "Uploading files to transcription service..."
+  defp transcription_wait_message(:queued), do: "Waiting in queue..."
+  defp transcription_wait_message(_), do: "Waiting in queue..."
+
   defp status_badge_class(status) do
     case status do
       "done" -> "badge-success"
@@ -629,6 +713,26 @@ defmodule NoterWeb.SessionLive.Show do
     end
   end
 
+  def handle_event("start_transcription", _params, socket) do
+    session = socket.assigns.session
+    lv = self()
+
+    Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
+
+    Task.start(fn ->
+      case Transcription.submit_job(session.id) do
+        {:ok, job_id} -> send(lv, {:transcription_submitted, job_id})
+        {:error, reason} -> send(lv, {:transcription_submit_failed, reason})
+      end
+    end)
+
+    {:noreply,
+     socket
+     |> assign(:transcribing?, true)
+     |> assign(:transcription_progress, nil)
+     |> assign(:transcription_status, :uploading)}
+  end
+
   def handle_event("delete_session", _params, socket) do
     session = socket.assigns.session
     campaign = socket.assigns.campaign
@@ -708,11 +812,123 @@ defmodule NoterWeb.SessionLive.Show do
      |> put_flash(:error, "Trimming failed: #{reason}")}
   end
 
+  def handle_info({:transcription_submitted, job_id}, socket) do
+    session = socket.assigns.session
+
+    {:ok, session} =
+      Sessions.update_transcription(session, %{
+        status: "transcribing",
+        transcription_job_id: job_id
+      })
+
+    {:ok, _pid} =
+      DynamicSupervisor.start_child(
+        Noter.TranscriptionSupervisor,
+        {Noter.Transcription.SSEClient, session_id: session.id, job_id: job_id}
+      )
+
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:transcription_status, :queued)}
+  end
+
+  def handle_info({:transcription_submit_failed, reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:transcribing?, false)
+     |> put_flash(:error, "Failed to start transcription: #{reason}")}
+  end
+
+  def handle_info({:transcription, :progress, data}, socket) do
+    {:noreply, assign(socket, :transcription_progress, data)}
+  end
+
+  def handle_info({:transcription, :queued, _}, socket) do
+    {:noreply,
+     socket
+     |> assign(:transcription_progress, nil)
+     |> assign(:transcription_status, :queued)}
+  end
+
+  def handle_info({:transcription, :file_start, data}, socket) do
+    progress = %{overall_pct: prev_overall_pct(socket), file: data.file, file_pct: 0}
+    {:noreply, assign(socket, :transcription_progress, progress)}
+  end
+
+  def handle_info({:transcription, :file_done, _data}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info({:transcription, :done, _}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:transcribing?, false)
+     |> assign(:transcription_progress, nil)
+     |> put_flash(:info, "Transcription complete.")}
+  end
+
+  def handle_info({:transcription, :error, %{error: msg}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:transcribing?, false)
+     |> assign(:transcription_progress, nil)
+     |> put_flash(:error, "Transcription failed: #{msg}")}
+  end
+
   def handle_info({:upload_processed, {:error, reason}}, socket) do
     {:noreply,
      socket
      |> assign(:processing?, false)
      |> put_flash(:error, "File processing failed: #{reason}")}
+  end
+
+  defp reconnect_transcription(socket, session) do
+    if session.status == "transcribing" and session.transcription_job_id do
+      Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
+
+      if Noter.Transcription.SSEClient.running?(session.id) do
+        progress = Noter.Transcription.SSEClient.get_progress(session.id)
+
+        socket
+        |> assign(:transcribing?, true)
+        |> assign(:transcription_progress, progress)
+        |> assign(:transcription_status, :transcribing)
+      else
+        case Transcription.poll_job(session.transcription_job_id) do
+          {:ok, %{"status" => "done", "result" => result}} ->
+            Sessions.update_transcription(session, %{
+              status: "transcribed",
+              transcript_json: Jason.encode!(result),
+              transcript_srt: result["srt"]
+            })
+
+            session = Sessions.get_session_with_campaign!(session.id)
+            assign(socket, :session, session)
+
+          {:ok, %{"status" => "failed", "error" => error}} ->
+            put_flash(socket, :error, "Transcription failed: #{error}")
+
+          {:ok, _} ->
+            {:ok, _pid} =
+              DynamicSupervisor.start_child(
+                Noter.TranscriptionSupervisor,
+                {Noter.Transcription.SSEClient,
+                 session_id: session.id, job_id: session.transcription_job_id}
+              )
+
+            assign(socket, :transcribing?, true)
+
+          {:error, reason} ->
+            put_flash(socket, :error, "Failed to check transcription status: #{reason}")
+        end
+      end
+    else
+      socket
+    end
   end
 
   defp retry_peaks_if_needed(socket, session) do
@@ -739,6 +955,13 @@ defmodule NoterWeb.SessionLive.Show do
       send(lv, {:peaks_ready, updated_session})
     else
       {:error, reason} -> send(lv, {:peaks_failed, reason})
+    end
+  end
+
+  defp prev_overall_pct(socket) do
+    case socket.assigns.transcription_progress do
+      %{overall_pct: pct} -> pct
+      _ -> 0.0
     end
   end
 

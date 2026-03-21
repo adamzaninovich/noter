@@ -18,7 +18,11 @@
       "mcp__plugin_playwright_playwright__browser_snapshot",
       "Bash(ls:*)",
       "mcp__plugin_playwright_playwright__browser_handle_dialog",
-      "mcp__plugin_playwright_playwright__browser_close"
+      "mcp__plugin_playwright_playwright__browser_close",
+      "mcp__tidewave__get_ecto_schemas",
+      "Bash(grep:*)",
+      "mcp__tidewave__search_package_docs",
+      "mcp__tidewave__get_logs"
     ]
   }
 }

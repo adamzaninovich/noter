@@ -20,6 +20,10 @@ if System.get_env("PHX_SERVER") do
   config :noter, NoterWeb.Endpoint, server: true
 end
 
+if url = System.get_env("TRANSCRIPTION_URL") do
+  config :noter, :transcription_url, url
+end
+
 config :noter, NoterWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
 if config_env() == :prod do

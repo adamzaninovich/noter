@@ -35,6 +35,13 @@ defmodule Noter.Sessions.Session do
     )
   end
 
+  def transcription_changeset(session, attrs) do
+    session
+    |> cast(attrs, [:status, :transcription_job_id, :transcript_json, :transcript_srt])
+    |> validate_required([:status])
+    |> validate_inclusion(:status, @valid_statuses)
+  end
+
   defp generate_slug(changeset) do
     case get_change(changeset, :name) do
       nil -> changeset
