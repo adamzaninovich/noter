@@ -29,3 +29,16 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+/* Wavesurfer region handles — must use ::part() to pierce shadow DOM */
+[data-waveform] ::part(region-handle) {
+  width: 8px !important;
+  background: oklch(0.65 0.2 250) !important;
+  border: none !important;
+  border-radius: 3px !important;
+  opacity: 0.9;
+}
+[data-waveform] ::part(region-handle):hover {
+  background: oklch(0.75 0.25 250) !important;
+  opacity: 1;
+}

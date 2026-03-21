@@ -21,6 +21,9 @@ defmodule NoterWeb.Router do
     live "/campaigns/:campaign_slug", CampaignLive.Show
     live "/campaigns/:campaign_slug/sessions/new", SessionLive.New
     live "/campaigns/:campaign_slug/sessions/:session_slug", SessionLive.Show
+
+    get "/sessions/:session_id/audio/merged", AudioController, :merged
+    get "/sessions/:session_id/audio/peaks", AudioController, :peaks
   end
 
   # Other scopes may use custom stacks.

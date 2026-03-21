@@ -53,9 +53,11 @@ defmodule NoterWeb.CoreComponents do
     <div
       :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
       id={@id}
+      phx-hook=".AutoDismissFlash"
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
+      data-kind={@kind}
       role="alert"
-      class="toast toast-top toast-end z-50"
+      class="toast toast-top toast-end z-50 transition-opacity duration-500"
       {@rest}
     >
       <div class={[
@@ -75,6 +77,21 @@ defmodule NoterWeb.CoreComponents do
         </button>
       </div>
     </div>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".AutoDismissFlash">
+      export default {
+        mounted() {
+          this.timer = setTimeout(() => {
+            this.el.style.opacity = "0"
+            setTimeout(() => {
+              this.pushEvent("lv:clear-flash", {key: this.el.dataset.kind})
+            }, 500)
+          }, 5000)
+        },
+        destroyed() {
+          clearTimeout(this.timer)
+        }
+      }
+    </script>
     """
   end
 

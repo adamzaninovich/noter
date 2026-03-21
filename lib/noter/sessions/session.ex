@@ -8,6 +8,7 @@ defmodule Noter.Sessions.Session do
     field :name, :string
     field :slug, :string
     field :status, :string, default: "uploading"
+    field :duration_seconds, :float
     field :trim_start_seconds, :float
     field :trim_end_seconds, :float
     field :transcription_job_id, :string
@@ -22,9 +23,11 @@ defmodule Noter.Sessions.Session do
 
   def changeset(session, attrs) do
     session
-    |> cast(attrs, [:name, :status])
+    |> cast(attrs, [:name, :status, :duration_seconds, :trim_start_seconds, :trim_end_seconds])
     |> validate_required([:name, :status])
     |> validate_inclusion(:status, @valid_statuses)
+    |> validate_number(:trim_start_seconds, greater_than_or_equal_to: 0)
+    |> validate_number(:trim_end_seconds, greater_than_or_equal_to: 0)
     |> generate_slug()
     |> validate_required([:slug], message: "name must contain at least one letter or number")
     |> unique_constraint([:campaign_id, :slug],

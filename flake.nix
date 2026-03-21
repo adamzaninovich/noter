@@ -18,7 +18,7 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          buildInputs = [ elixir ]
+          buildInputs = [ elixir pkgs.ffmpeg pkgs.audiowaveform ]
             ++ pkgs.lib.optional pkgs.stdenv.isDarwin pkgs.terminal-notifier;
         };
       });

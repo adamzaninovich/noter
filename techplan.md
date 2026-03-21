@@ -30,16 +30,28 @@ Session creation, file uploads, FLAC extraction and renaming.
 
 ## Phase 3 — Audio Trimming
 
-Waveform UI for setting trim points, ffmpeg clipping.
+Waveform UI for setting trim points, server-side peak generation, ffmpeg clipping with sample-accurate boundaries. Files are 3-4 hours long so browser decoding is not viable — precomputed peaks via `audiowaveform` are used instead.
 
-- Install wavesurfer.js (npm in assets/)
-- `phx-hook` for waveform player — load merged AAC, region selection for start/end
-- Push trim timestamps to server via `phx-submit` or `pushEvent`
-- Server: store `trim_start_seconds` / `trim_end_seconds` on session (add to `Session.changeset` cast)
-- On confirm: run ffmpeg to clip all FLACs and convert merged AAC → M4A (wire up existing `Prep.clip_and_rename/5`)
-- Store trimmed files under `priv/uploads/<session_id>/trimmed/`
-- Serve merged AAC via a controller/plug endpoint so wavesurfer can load it
-- Transition session status `uploaded → trimmed`
+- Add `ffmpeg` + `audiowaveform` to `flake.nix` buildInputs
+- Install wavesurfer.js v7 (npm in assets/)
+- Migration: add `duration_seconds` float column to sessions
+- `Session` schema: add `duration_seconds` field, cast + validate trim fields (>= 0)
+- `Uploads.generate_peaks/1` — ffmpeg mono WAV → audiowaveform JSON, temp file cleanup via `try/after`
+- `Uploads.get_duration/1` — ffprobe duration extraction
+- `Uploads.trim_session/3` — `precise_clip` using `-ss` + `atrim` filter for sample-accurate trim (re-encodes, no `-c copy`). Clips all renamed FLACs + merged AAC → M4A. Cleans up `trimmed/` on failure
+- Persist duration + generate peaks during upload processing (background Task, after `process_uploads`)
+- `AudioController` (new) — serves `merged.aac` and `peaks.json` via `send_file`
+- Routes: `GET /sessions/:session_id/audio/merged`, `GET /sessions/:session_id/audio/peaks`
+- Colocated `.Waveform` JS hook with `phx-update="ignore"`:
+  - Loads precomputed peaks JSON, renders via wavesurfer with `peaks: [data]` + `duration`
+  - Regions plugin for draggable start/end trim handles (region = audio to keep)
+  - Click-to-seek, spacebar play/pause, zoom slider (1–200 minPxPerSec)
+  - Preview Start/End buttons: seek to boundary ±3s, play 6s, auto-pause (clears previous timer)
+  - Time labels updated locally during drag (`region.on("update")`), synced to LiveView on drag end (`pushEvent("trim_region_updated")`)
+  - All dynamic text (current time, trim times, "keeping X of Y") managed entirely by JS in the hook
+- LiveView events: `trim_region_updated` (store assigns), `confirm_trim` (spawn Task → `Uploads.trim_session/3`)
+- On trim success: status → `trimmed`, trim values persisted. On failure: status stays `uploaded`, error flash, `trimmed/` cleaned up
+- Reuses `Prep.find_flac_files/1`, `Prep.resolve_character/2`, `Uploads.session_dir/1`, existing background Task pattern
 
 ## Phase 4 — Transcription Service Integration
 

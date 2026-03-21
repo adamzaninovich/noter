@@ -6,6 +6,14 @@ defmodule NoterWeb.SessionLive.New do
   alias Noter.Uploads
   import NoterWeb.SessionLive.UploadHelpers
 
+  @steps [
+    {"uploading", "Upload"},
+    {"uploaded", "Trim"},
+    {"trimmed", "Transcribe"},
+    {"transcribed", "Review"},
+    {"done", "Done"}
+  ]
+
   @impl true
   def mount(%{"campaign_slug" => campaign_slug}, _session, socket) do
     campaign = Campaigns.get_campaign_by_slug!(campaign_slug)
@@ -16,6 +24,7 @@ defmodule NoterWeb.SessionLive.New do
      |> assign(:page_title, "New Session")
      |> assign(:campaign, campaign)
      |> assign(:form, to_form(changeset))
+     |> assign(:steps, @steps)
      |> assign(:processing?, false)
      |> allow_upload(:zip_file,
        accept: ~w(.zip),
@@ -51,6 +60,12 @@ defmodule NoterWeb.SessionLive.New do
             <h1 class="text-3xl font-bold">New Session</h1>
           </div>
         </div>
+
+        <ul class="steps w-full">
+          <%= for {status_key, label} <- @steps do %>
+            <li class={["step", status_key == "uploading" && "step-primary"]}>{label}</li>
+          <% end %>
+        </ul>
 
         <div class="card bg-base-200 shadow-sm">
           <div class="card-body">
