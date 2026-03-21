@@ -9,4 +9,5 @@ tmp/
 cover/
 doc/
 priv/uploads/
+assets/node_modules/
 .playwright-mcp

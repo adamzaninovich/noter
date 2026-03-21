@@ -4,7 +4,7 @@ ARG RUNNER_IMAGE="debian:bookworm-slim"
 # --- build stage ---
 FROM ${BUILDER_IMAGE} AS builder
 
-RUN apt-get update -y && apt-get install -y build-essential git \
+RUN apt-get update -y && apt-get install -y build-essential git nodejs npm \
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 WORKDIR /app
@@ -23,6 +23,7 @@ COPY priv priv
 COPY lib lib
 COPY assets assets
 
+RUN npm install --prefix assets
 RUN mix compile
 RUN mix assets.deploy
 
