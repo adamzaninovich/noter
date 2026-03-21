@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ $# -lt 1 ]; then
+  echo "Usage: $0 <install-path> [transcription-url]"
+  echo ""
+  echo "  install-path       Directory to create uploads/ and compose.yaml in"
+  echo "  transcription-url  Transcription service URL (default: http://host.docker.internal:8000)"
+  exit 1
+fi
+
+INSTALL_DIR="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+TRANSCRIPTION_URL="${2:-http://host.docker.internal:8000}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+echo "==> Building Docker image..."
+docker build -t noter:latest "$PROJECT_DIR"
+
+echo "==> Setting up $INSTALL_DIR..."
+mkdir -p "$INSTALL_DIR/uploads"
+
+SECRET_KEY_BASE="$(openssl rand -base64 48)"
+
+cat > "$INSTALL_DIR/compose.yaml" << EOF
+services:
+  noter:
+    image: noter:latest
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_PATH: /app/data/noter.db
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE}"
+      UPLOADS_DIR: /app/data/uploads
+      TRANSCRIPTION_URL: "${TRANSCRIPTION_URL}"
+      PHX_HOST: localhost
+    volumes:
+      - ./uploads:/app/data/uploads
+      - noter_db:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  noter_db:
+EOF
+
+echo ""
+echo "Done! To start:"
+echo "  cd $INSTALL_DIR && docker compose up -d"

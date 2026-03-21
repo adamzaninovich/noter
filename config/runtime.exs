@@ -24,6 +24,10 @@ if url = System.get_env("TRANSCRIPTION_URL") do
   config :noter, :transcription_url, url
 end
 
+if dir = System.get_env("UPLOADS_DIR") do
+  config :noter, :uploads_dir, dir
+end
+
 config :noter, NoterWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
 if config_env() == :prod do

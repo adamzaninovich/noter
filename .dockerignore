@@ -1,0 +1,12 @@
+_build/
+deps/
+.git/
+.env
+*.db
+*.db-*
+plans/
+tmp/
+cover/
+doc/
+priv/uploads/
+.playwright-mcp

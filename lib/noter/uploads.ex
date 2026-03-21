@@ -2,7 +2,12 @@ defmodule Noter.Uploads do
   alias Noter.Prep
 
   def session_dir(session_id) do
-    Path.join([Application.app_dir(:noter, "priv"), "uploads", to_string(session_id)])
+    Path.join([uploads_dir(), to_string(session_id)])
+  end
+
+  def uploads_dir do
+    Application.get_env(:noter, :uploads_dir) ||
+      Path.join(Application.app_dir(:noter, "priv"), "uploads")
   end
 
   def process_uploads(session, campaign, zip_path, aac_path, vocab_path) do
