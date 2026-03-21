@@ -284,24 +284,75 @@ defmodule NoterWeb.SessionLive.Show do
           </div>
         <% end %>
 
+        <%!-- Done summary card --%>
+        <%= if @session.status == "done" do %>
+          <div class="card bg-base-200 shadow-sm">
+            <div class="card-body">
+              <div class="flex items-center justify-between">
+                <h2 class="card-title text-lg">
+                  <.icon name="hero-check-circle-solid" class="size-6 text-success" />
+                  Session Complete
+                </h2>
+                <div class="flex items-center gap-2">
+                  <button
+                    id="unfinalize-btn"
+                    phx-click="unfinalize"
+                    class="btn btn-outline btn-sm"
+                    phx-disable-with="Unfinalizing..."
+                  >
+                    Back to Review
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between mt-3">
+                <div class="flex flex-wrap gap-6">
+                  <div class="flex flex-col items-center">
+                    <span class="text-2xl font-bold">{@done_stats.duration}</span>
+                    <span class="text-xs text-base-content/60">Duration</span>
+                  </div>
+                  <div class="flex flex-col items-center">
+                    <span class="text-2xl font-bold">{@done_stats.speaker_count}</span>
+                    <span class="text-xs text-base-content/60">Speakers</span>
+                  </div>
+                  <div class="flex flex-col items-center">
+                    <span class="text-2xl font-bold">{@done_stats.turn_count}</span>
+                    <span class="text-xs text-base-content/60">Turns</span>
+                  </div>
+                  <div class="flex flex-col items-center">
+                    <span class="text-2xl font-bold">{@done_stats.replacement_count}</span>
+                    <span class="text-xs text-base-content/60">Replacements</span>
+                  </div>
+                  <div class="flex flex-col items-center">
+                    <span class="text-2xl font-bold">{@done_stats.edit_count}</span>
+                    <span class="text-xs text-base-content/60">Edits</span>
+                  </div>
+                </div>
+                <a
+                  href={~p"/sessions/#{@session.id}/download"}
+                  class="btn btn-primary"
+                  id="download-btn"
+                >
+                  <.icon name="hero-arrow-down-tray" class="size-5" /> Download ZIP
+                </a>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
         <%!-- Transcript review card --%>
         <%= if @reviewing? do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <div class="flex items-center justify-between">
-                <h2 class="card-title text-lg">Transcript Review</h2>
+                <h2 class="card-title text-lg">
+                  {if(@session.status == "done", do: "Transcript", else: "Transcript Review")}
+                </h2>
                 <div class="flex items-center gap-2">
                   <%= if @session.status == "done" do %>
                     <span class="badge badge-success gap-1">
                       <.icon name="hero-check-circle-mini" class="size-4" /> Finalized
                     </span>
-                    <button
-                      id="unfinalize-btn"
-                      phx-click="unfinalize"
-                      class="btn btn-outline btn-sm"
-                    >
-                      Back to Review
-                    </button>
                   <% else %>
                     <button
                       id="finalize-btn"
@@ -315,12 +366,17 @@ defmodule NoterWeb.SessionLive.Show do
                 </div>
               </div>
               <p class="text-sm text-base-content/60 mb-2">
-                Click any word to prefill the find field. Add replacements to fix transcription errors.
+                <%= if @session.status == "done" do %>
+                  Read-only view of the finalized transcript.
+                <% else %>
+                  Click any word to prefill the find field. Add replacements to fix transcription errors.
+                <% end %>
               </p>
               <div class="flex gap-6">
                 <%!-- Left: transcript viewer --%>
                 <div class="flex-1 min-w-0 space-y-3">
                   <div
+                    :if={@session.status != "done"}
                     id="transcript-audio"
                     phx-hook=".TranscriptAudio"
                     phx-update="ignore"
@@ -334,38 +390,44 @@ defmodule NoterWeb.SessionLive.Show do
                     class="space-y-2 max-h-[70vh] overflow-y-auto pr-1"
                   >
                     <div :for={{id, turn} <- @streams.turns} id={id} class="group">
-                      {turn_row(%{turn: turn, speaker_colors: @speaker_colors})}
+                      {turn_row(%{
+                        turn: turn,
+                        speaker_colors: @speaker_colors,
+                        read_only?: @done_stats != nil
+                      })}
                     </div>
                   </div>
                 </div>
 
                 <%!-- Right: replacements panel --%>
                 <div class="w-80 shrink-0 flex flex-col max-h-[70vh]">
-                  <.form
-                    for={@replacement_form}
-                    id="replacement-form"
-                    phx-submit="add_replacement"
-                    phx-change="validate_replacement"
-                    class="shrink-0 mb-4"
-                  >
-                    <div class="flex items-center gap-2 [&_.fieldset]:mb-0">
-                      <.input
-                        field={@replacement_form[:find]}
-                        placeholder="Find..."
-                        class="input input-sm input-bordered flex-1"
-                      />
-                      <.input
-                        field={@replacement_form[:replace]}
-                        placeholder="Replace..."
-                        class="input input-sm input-bordered flex-1"
-                      />
-                      <button type="submit" class="btn btn-primary btn-sm">Add</button>
-                    </div>
-                  </.form>
+                  <%= if @session.status != "done" do %>
+                    <.form
+                      for={@replacement_form}
+                      id="replacement-form"
+                      phx-submit="add_replacement"
+                      phx-change="validate_replacement"
+                      class="shrink-0 mb-4"
+                    >
+                      <div class="flex items-center gap-2 [&_.fieldset]:mb-0">
+                        <.input
+                          field={@replacement_form[:find]}
+                          placeholder="Find..."
+                          class="input input-sm input-bordered flex-1"
+                        />
+                        <.input
+                          field={@replacement_form[:replace]}
+                          placeholder="Replace..."
+                          class="input input-sm input-bordered flex-1"
+                        />
+                        <button type="submit" class="btn btn-primary btn-sm">Add</button>
+                      </div>
+                    </.form>
+                  <% end %>
 
                   <%= if @replacements != %{} do %>
                     <div class="text-xs font-semibold text-base-content/60 uppercase tracking-wide shrink-0 mb-1">
-                      Active Replacements
+                      {if(@session.status == "done", do: "Replacements", else: "Active Replacements")}
                     </div>
                     <div class="overflow-y-auto space-y-1 pr-1">
                       <%= for {find, replace} <- @replacements do %>
@@ -379,14 +441,16 @@ defmodule NoterWeb.SessionLive.Show do
                           <span class="badge badge-xs badge-ghost ml-auto">
                             {Map.get(@match_counts, find, 0)}
                           </span>
-                          <button
-                            type="button"
-                            phx-click="remove_replacement"
-                            phx-value-find={find}
-                            class="btn btn-ghost btn-xs text-error"
-                          >
-                            <.icon name="hero-x-mark-micro" class="size-4" />
-                          </button>
+                          <%= if @session.status != "done" do %>
+                            <button
+                              type="button"
+                              phx-click="remove_replacement"
+                              phx-value-find={find}
+                              class="btn btn-ghost btn-xs text-error"
+                            >
+                              <.icon name="hero-x-mark-micro" class="size-4" />
+                            </button>
+                          <% end %>
                         </div>
                       <% end %>
                     </div>
@@ -726,6 +790,7 @@ defmodule NoterWeb.SessionLive.Show do
       !@turn.editing? && "hover:bg-base-100"
     ]}>
       <button
+        :if={not @read_only?}
         type="button"
         data-play-turn
         data-turn-start={@turn.start}
@@ -777,58 +842,61 @@ defmodule NoterWeb.SessionLive.Show do
                 <%= for word <- @turn.display_words do %>
                   {leading_space(word.word)}<span
                     class={[
-                      "cursor-pointer hover:outline hover:outline-1 hover:outline-base-content/20 rounded-sm",
+                      not @read_only? &&
+                        "cursor-pointer hover:outline hover:outline-1 hover:outline-base-content/20 rounded-sm",
                       word.replaced? && "bg-success/20 text-success font-medium"
                     ]}
-                    phx-click="prefill_replacement"
+                    phx-click={if(not @read_only?, do: "prefill_replacement")}
                     phx-value-word={strip_display_word(word.word)}
                   >{String.trim_leading(word.word)}</span>
                 <% end %>
             <% end %>
           </p>
-          <div class="flex items-center gap-0.5 shrink-0 mt-0.5">
-            <%= if @turn.edited? or @turn.deleted? do %>
-              <span class={[
-                "badge badge-xs",
-                if(@turn.deleted?, do: "badge-error", else: "badge-info")
-              ]}>
-                {if(@turn.deleted?, do: "deleted", else: "edited")}
-              </span>
+          <%= unless @read_only? do %>
+            <div class="flex items-center gap-0.5 shrink-0 mt-0.5">
+              <%= if @turn.edited? or @turn.deleted? do %>
+                <span class={[
+                  "badge badge-xs",
+                  if(@turn.deleted?, do: "badge-error", else: "badge-info")
+                ]}>
+                  {if(@turn.deleted?, do: "deleted", else: "edited")}
+                </span>
+                <button
+                  type="button"
+                  phx-click="remove_edit"
+                  phx-value-turn-id={@turn.id}
+                  class="btn btn-ghost btn-xs text-warning"
+                  title="Revert"
+                >
+                  <.icon name="hero-arrow-uturn-left-mini" class="size-3" />
+                </button>
+              <% end %>
+              <%= if not @turn.deleted? do %>
+                <button
+                  type="button"
+                  phx-click="start_edit"
+                  phx-value-turn-id={@turn.id}
+                  class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100"
+                  title="Edit turn"
+                >
+                  <.icon name="hero-pencil-square-mini" class="size-3" />
+                </button>
+              <% end %>
               <button
                 type="button"
-                phx-click="remove_edit"
+                phx-click="delete_turn"
                 phx-value-turn-id={@turn.id}
-                class="btn btn-ghost btn-xs text-warning"
-                title="Revert"
+                class={[
+                  "btn btn-ghost btn-xs text-error",
+                  !@turn.deleted? && "opacity-0 group-hover:opacity-100"
+                ]}
+                title={if(@turn.deleted?, do: "Already deleted", else: "Delete turn")}
+                disabled={@turn.deleted?}
               >
-                <.icon name="hero-arrow-uturn-left-mini" class="size-3" />
+                <.icon name="hero-trash-mini" class="size-3" />
               </button>
-            <% end %>
-            <%= if not @turn.deleted? do %>
-              <button
-                type="button"
-                phx-click="start_edit"
-                phx-value-turn-id={@turn.id}
-                class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100"
-                title="Edit turn"
-              >
-                <.icon name="hero-pencil-square-mini" class="size-3" />
-              </button>
-            <% end %>
-            <button
-              type="button"
-              phx-click="delete_turn"
-              phx-value-turn-id={@turn.id}
-              class={[
-                "btn btn-ghost btn-xs text-error",
-                !@turn.deleted? && "opacity-0 group-hover:opacity-100"
-              ]}
-              title={if(@turn.deleted?, do: "Already deleted", else: "Delete turn")}
-              disabled={@turn.deleted?}
-            >
-              <.icon name="hero-trash-mini" class="size-3" />
-            </button>
-          </div>
+            </div>
+          <% end %>
         </div>
       <% end %>
     </div>
@@ -1360,6 +1428,13 @@ defmodule NoterWeb.SessionLive.Show do
       speakers = raw_turns |> Enum.map(& &1.speaker) |> Enum.uniq()
       speaker_colors = build_speaker_colors(speakers)
 
+      done_stats =
+        if session.status == "done" do
+          compute_done_stats(session, raw_turns, replacements, edits)
+        else
+          nil
+        end
+
       socket
       |> assign(:reviewing?, true)
       |> assign(:raw_turns, raw_turns)
@@ -1371,6 +1446,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:editing_turn_id, nil)
       |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
       |> assign(:trimmed_audio_url, ~p"/sessions/#{session.id}/audio/trimmed")
+      |> assign(:done_stats, done_stats)
       |> stream(:turns, display_turns, reset: true)
     else
       socket
@@ -1384,6 +1460,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:editing_turn_id, nil)
       |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
       |> assign(:trimmed_audio_url, nil)
+      |> assign(:done_stats, nil)
     end
   end
 
@@ -1443,6 +1520,25 @@ defmodule NoterWeb.SessionLive.Show do
     |> Transcript.apply_edits(socket.assigns.edits)
     |> hd()
     |> Map.merge(%{editing?: false, edit_form: nil})
+  end
+
+  defp compute_done_stats(session, raw_turns, replacements, edits) do
+    duration =
+      if session.trim_start_seconds && session.trim_end_seconds do
+        format_time(session.trim_end_seconds - session.trim_start_seconds)
+      else
+        format_time(session.duration_seconds || 0)
+      end
+
+    speakers = raw_turns |> Enum.map(& &1.speaker) |> Enum.uniq()
+
+    %{
+      duration: duration,
+      speaker_count: length(speakers),
+      turn_count: length(raw_turns),
+      replacement_count: map_size(replacements),
+      edit_count: map_size(edits)
+    }
   end
 
   defp build_speaker_colors(speakers) do

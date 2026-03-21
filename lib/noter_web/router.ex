@@ -25,6 +25,7 @@ defmodule NoterWeb.Router do
     get "/sessions/:session_id/audio/merged", AudioController, :merged
     get "/sessions/:session_id/audio/trimmed", AudioController, :trimmed_merged
     get "/sessions/:session_id/audio/peaks", AudioController, :peaks
+    get "/sessions/:session_id/download", DownloadController, :download
   end
 
   # Other scopes may use custom stacks.
