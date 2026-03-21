@@ -4,7 +4,6 @@ defmodule NoterWeb.SessionLive.Show do
   alias Noter.Sessions
   alias Noter.Uploads
   alias Noter.Transcription
-  import NoterWeb.SessionLive.UploadHelpers
 
   @steps [
     {"uploading", "Upload"},
@@ -31,7 +30,6 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.aac")))
       |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
       |> assign(:steps, @steps)
-      |> assign(:processing?, false)
       |> assign(:trimming?, false)
       |> assign(:generating_peaks?, false)
       |> assign(:trim_start, session.trim_start_seconds)
@@ -42,26 +40,6 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign_audio_urls(session)
       |> retry_peaks_if_needed(session)
       |> reconnect_transcription(session)
-
-    socket =
-      if session.status == "uploading" do
-        socket
-        |> allow_upload(:zip_file,
-          accept: ~w(.zip),
-          max_entries: 1,
-          max_file_size: 2_000_000_000,
-          chunk_size: 512_000
-        )
-        |> allow_upload(:aac_file,
-          accept: ~w(.aac),
-          max_entries: 1,
-          max_file_size: 1_000_000_000,
-          chunk_size: 512_000
-        )
-        |> allow_upload(:vocab_file, accept: ~w(.txt), max_entries: 1, max_file_size: 1_000_000)
-      else
-        socket
-      end
 
     {:ok, socket}
   end
@@ -98,83 +76,6 @@ defmodule NoterWeb.SessionLive.Show do
             </li>
           <% end %>
         </ul>
-
-        <%!-- Processing spinner --%>
-        <%= if @processing? do %>
-          <div class="card bg-base-200 shadow-sm">
-            <div class="card-body">
-              <div class="flex flex-col items-center py-8 gap-4">
-                <span class="loading loading-spinner loading-lg text-primary"></span>
-                <p class="text-base-content/70">Processing uploaded files...</p>
-              </div>
-            </div>
-          </div>
-        <% end %>
-
-        <%!-- Upload form when status is "uploading" --%>
-        <%= if @session.status == "uploading" and not @processing? do %>
-          <div class="card bg-base-200 shadow-sm">
-            <div class="card-body">
-              <h2 class="card-title text-lg">Upload Files</h2>
-              <p class="text-sm text-base-content/60">
-                Upload your Discord recording zip, merged audio, and vocabulary file to continue.
-              </p>
-
-              <.form for={%{}} id="upload-form" phx-submit="upload" class="space-y-4 mt-2">
-                <div>
-                  <label class="label font-medium">Discord Recording (ZIP)</label>
-                  <div class="flex flex-col gap-2" phx-drop-target={@uploads.zip_file.ref}>
-                    <.live_file_input
-                      upload={@uploads.zip_file}
-                      class="file-input file-input-bordered w-full"
-                    />
-                    <.upload_entries
-                      entries={@uploads.zip_file.entries}
-                      upload_ref={@uploads.zip_file.ref}
-                      upload={@uploads.zip_file}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label class="label font-medium">Merged Audio (AAC)</label>
-                  <div class="flex flex-col gap-2" phx-drop-target={@uploads.aac_file.ref}>
-                    <.live_file_input
-                      upload={@uploads.aac_file}
-                      class="file-input file-input-bordered w-full"
-                    />
-                    <.upload_entries
-                      entries={@uploads.aac_file.entries}
-                      upload_ref={@uploads.aac_file.ref}
-                      upload={@uploads.aac_file}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label class="label font-medium">Vocabulary File (TXT)</label>
-                  <div class="flex flex-col gap-2" phx-drop-target={@uploads.vocab_file.ref}>
-                    <.live_file_input
-                      upload={@uploads.vocab_file}
-                      class="file-input file-input-bordered w-full"
-                    />
-                    <.upload_entries
-                      entries={@uploads.vocab_file.entries}
-                      upload_ref={@uploads.vocab_file.ref}
-                      upload={@uploads.vocab_file}
-                    />
-                  </div>
-                </div>
-
-                <div class="flex justify-end pt-2">
-                  <.button type="submit" class="btn btn-primary" phx-disable-with="Uploading...">
-                    Upload Files
-                  </.button>
-                </div>
-              </.form>
-            </div>
-          </div>
-        <% end %>
 
         <%!-- Generating waveform spinner --%>
         <%= if @generating_peaks? do %>
@@ -281,13 +182,26 @@ defmodule NoterWeb.SessionLive.Show do
           </div>
         <% end %>
 
-        <%!-- Trimming spinner --%>
+        <%!-- Trimming progress --%>
         <%= if @trimming? do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
-              <div class="flex flex-col items-center py-8 gap-4">
-                <span class="loading loading-spinner loading-lg text-primary"></span>
-                <p class="text-base-content/70">Trimming audio files...</p>
+              <h2 class="card-title text-lg">Trimming Audio</h2>
+              <div class="space-y-3 mt-2">
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-base-content/70">
+                    {trim_step_label(@trim_current_file)}
+                  </span>
+                  <span class="font-mono text-base-content/70">
+                    {@trim_completed + 1}/{@trim_total}
+                  </span>
+                </div>
+                <progress
+                  class="progress progress-primary w-full"
+                  value={@trim_completed}
+                  max={@trim_total}
+                >
+                </progress>
               </div>
             </div>
           </div>
@@ -623,6 +537,14 @@ defmodule NoterWeb.SessionLive.Show do
     current_idx >= step_idx
   end
 
+  defp trim_step_label("merged.wav"), do: "Trimming merged audio"
+  defp trim_step_label("merged.m4a"), do: "Converting to M4A for playback"
+
+  defp trim_step_label(file) do
+    name = Path.basename(file, Path.extname(file))
+    "Trimming speaker: #{name}"
+  end
+
   defp transcription_wait_message(:uploading), do: "Uploading files to transcription service..."
   defp transcription_wait_message(:queued), do: "Waiting in queue..."
   defp transcription_wait_message(_), do: "Waiting in queue..."
@@ -630,59 +552,12 @@ defmodule NoterWeb.SessionLive.Show do
   defp status_badge_class(status) do
     case status do
       "done" -> "badge-success"
-      "reviewing" -> "badge-warning"
-      "transcribing" -> "badge-info"
-      "transcribed" -> "badge-info"
-      "uploaded" -> "badge-primary"
-      _ -> "badge-ghost"
+      status when status in ~w(uploading transcribing) -> "badge-info"
+      _ -> "badge-soft badge-info"
     end
   end
 
   @impl true
-  def handle_event("cancel-upload", %{"ref" => ref, "upload-ref" => upload_ref}, socket) do
-    {:noreply, cancel_upload_by_ref(socket, ref, upload_ref)}
-  end
-
-  def handle_event("upload", _params, socket) do
-    if socket.assigns.uploads.zip_file.entries == [] do
-      {:noreply, put_flash(socket, :error, "A ZIP file is required.")}
-    else
-      session = socket.assigns.session
-      campaign = socket.assigns.campaign
-
-      zip_paths = consume_uploaded_entries(socket, :zip_file, &consume_to_tmp/2)
-      aac_paths = consume_uploaded_entries(socket, :aac_file, &consume_to_tmp/2)
-      vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
-
-      lv = self()
-
-      Task.start(fn ->
-        result =
-          case Uploads.process_uploads(
-                 session,
-                 campaign,
-                 List.first(zip_paths),
-                 List.first(aac_paths),
-                 List.first(vocab_paths)
-               ) do
-            {:ok, _renamed} ->
-              Sessions.update_session(session, %{status: "uploaded"})
-
-            {:error, reason} ->
-              {:error, reason}
-          end
-
-        send(lv, {:upload_processed, result})
-
-        with {:ok, updated_session} <- result do
-          run_peak_pipeline(updated_session, lv)
-        end
-      end)
-
-      {:noreply, assign(socket, :processing?, true)}
-    end
-  end
-
   def handle_event("trim_region_updated", %{"start" => start, "end" => end_val}, socket) do
     {:noreply,
      socket
@@ -705,11 +580,20 @@ defmodule NoterWeb.SessionLive.Show do
         session = Sessions.get_session_with_campaign!(session.id)
 
         Task.start(fn ->
-          result = Uploads.trim_session(session, start, end_val)
+          on_progress = fn file, {completed, total} ->
+            send(lv, {:trim_progress, file, completed, total})
+          end
+
+          result = Uploads.trim_session(session, start, end_val, on_progress)
           send(lv, {:trim_complete, result, start, end_val})
         end)
 
-        {:noreply, assign(socket, :trimming?, true)}
+        {:noreply,
+         socket
+         |> assign(:trimming?, true)
+         |> assign(:trim_current_file, "...")
+         |> assign(:trim_completed, 0)
+         |> assign(:trim_total, 0)}
     end
   end
 
@@ -747,23 +631,6 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   @impl true
-  def handle_info({:upload_processed, {:ok, session}}, socket) do
-    renamed_files = Uploads.list_renamed_files(session.id)
-    session_dir = Uploads.session_dir(session.id)
-
-    {:noreply,
-     socket
-     |> assign(:session, session)
-     |> assign(:renamed_files, renamed_files)
-     |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.aac")))
-     |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
-     |> assign(:trim_start, nil)
-     |> assign(:trim_end, nil)
-     |> assign(:processing?, false)
-     |> assign(:generating_peaks?, true)
-     |> put_flash(:info, "Files uploaded. Generating waveform...")}
-  end
-
   def handle_info({:peaks_ready, session}, socket) do
     {:noreply,
      socket
@@ -778,6 +645,14 @@ defmodule NoterWeb.SessionLive.Show do
      socket
      |> assign(:generating_peaks?, false)
      |> put_flash(:error, "Waveform generation failed: #{reason}")}
+  end
+
+  def handle_info({:trim_progress, file, completed, total}, socket) do
+    {:noreply,
+     socket
+     |> assign(:trim_current_file, file)
+     |> assign(:trim_completed, completed)
+     |> assign(:trim_total, total)}
   end
 
   def handle_info({:trim_complete, :ok, start, end_val}, socket) do
@@ -877,13 +752,6 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:transcribing?, false)
      |> assign(:transcription_progress, nil)
      |> put_flash(:error, "Transcription failed: #{msg}")}
-  end
-
-  def handle_info({:upload_processed, {:error, reason}}, socket) do
-    {:noreply,
-     socket
-     |> assign(:processing?, false)
-     |> put_flash(:error, "File processing failed: #{reason}")}
   end
 
   defp reconnect_transcription(socket, session) do

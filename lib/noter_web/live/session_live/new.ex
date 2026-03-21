@@ -94,7 +94,9 @@ defmodule NoterWeb.SessionLive.New do
                 <div class="space-y-4">
                   <%!-- Zip Upload --%>
                   <div>
-                    <label class="label font-medium">Discord Recording (ZIP)</label>
+                    <label class="label font-medium">
+                      Discord Recording (ZIP) <span class="text-error text-xs ml-1">Required</span>
+                    </label>
                     <div class="flex flex-col gap-2" phx-drop-target={@uploads.zip_file.ref}>
                       <.live_file_input
                         upload={@uploads.zip_file}
@@ -110,7 +112,9 @@ defmodule NoterWeb.SessionLive.New do
 
                   <%!-- AAC Upload --%>
                   <div>
-                    <label class="label font-medium">Merged Audio (AAC)</label>
+                    <label class="label font-medium">
+                      Merged Audio (AAC) <span class="text-error text-xs ml-1">Required</span>
+                    </label>
                     <div class="flex flex-col gap-2" phx-drop-target={@uploads.aac_file.ref}>
                       <.live_file_input
                         upload={@uploads.aac_file}
@@ -145,7 +149,16 @@ defmodule NoterWeb.SessionLive.New do
                   <.link navigate={~p"/campaigns/#{@campaign.slug}"} class="btn btn-ghost">
                     Cancel
                   </.link>
-                  <.button type="submit" class="btn btn-primary" phx-disable-with="Uploading...">
+                  <.button
+                    type="submit"
+                    class="btn btn-primary"
+                    phx-disable-with="Uploading..."
+                    disabled={
+                      @form[:name].value in [nil, ""] or
+                        @uploads.zip_file.entries == [] or
+                        @uploads.aac_file.entries == []
+                    }
+                  >
                     Create Session
                   </.button>
                 </div>
@@ -175,48 +188,53 @@ defmodule NoterWeb.SessionLive.New do
   def handle_event("save", %{"session" => session_params}, socket) do
     campaign = socket.assigns.campaign
 
-    if socket.assigns.uploads.zip_file.entries == [] do
-      {:noreply, put_flash(socket, :error, "A ZIP file is required.")}
-    else
-      changeset =
-        %Noter.Sessions.Session{campaign_id: campaign.id}
-        |> Sessions.change_session(session_params)
+    cond do
+      socket.assigns.uploads.zip_file.entries == [] ->
+        {:noreply, put_flash(socket, :error, "A ZIP file is required.")}
 
-      if changeset.valid? do
-        zip_paths = consume_uploaded_entries(socket, :zip_file, &consume_to_tmp/2)
-        aac_paths = consume_uploaded_entries(socket, :aac_file, &consume_to_tmp/2)
-        vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
+      socket.assigns.uploads.aac_file.entries == [] ->
+        {:noreply, put_flash(socket, :error, "A merged audio file is required.")}
 
-        lv = self()
+      true ->
+        changeset =
+          %Noter.Sessions.Session{campaign_id: campaign.id}
+          |> Sessions.change_session(session_params)
 
-        Task.start(fn ->
-          result =
-            with {:ok, session} <- Sessions.create_session(campaign, session_params),
-                 {:ok, _renamed} <-
-                   Uploads.process_uploads(
-                     session,
-                     campaign,
-                     List.first(zip_paths),
-                     List.first(aac_paths),
-                     List.first(vocab_paths)
-                   ),
-                 {:ok, _session} <- Sessions.update_session(session, %{status: "uploaded"}) do
-              {:ok, session}
-            else
-              {:error, %Ecto.Changeset{} = changeset} ->
-                {:error, changeset}
+        if changeset.valid? do
+          zip_paths = consume_uploaded_entries(socket, :zip_file, &consume_to_tmp/2)
+          aac_paths = consume_uploaded_entries(socket, :aac_file, &consume_to_tmp/2)
+          vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
 
-              {:error, reason} ->
-                {:error, reason}
-            end
+          lv = self()
 
-          send(lv, {:upload_processed, result})
-        end)
+          Task.start(fn ->
+            result =
+              with {:ok, session} <- Sessions.create_session(campaign, session_params),
+                   {:ok, _renamed} <-
+                     Uploads.process_uploads(
+                       session,
+                       campaign,
+                       List.first(zip_paths),
+                       List.first(aac_paths),
+                       List.first(vocab_paths)
+                     ),
+                   {:ok, _session} <- Sessions.update_session(session, %{status: "uploaded"}) do
+                {:ok, session}
+              else
+                {:error, %Ecto.Changeset{} = changeset} ->
+                  {:error, changeset}
 
-        {:noreply, assign(socket, :processing?, true)}
-      else
-        {:noreply, assign(socket, form: to_form(%{changeset | action: :validate}))}
-      end
+                {:error, reason} ->
+                  {:error, reason}
+              end
+
+            send(lv, {:upload_processed, result})
+          end)
+
+          {:noreply, assign(socket, :processing?, true)}
+        else
+          {:noreply, assign(socket, form: to_form(%{changeset | action: :validate}))}
+        end
     end
   end
 

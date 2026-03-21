@@ -78,27 +78,33 @@ defmodule Noter.Uploads do
     end
   end
 
-  def trim_session(session, start_seconds, end_seconds) do
+  def trim_session(session, start_seconds, end_seconds, on_progress \\ fn _, _ -> :ok end) do
     base_dir = session_dir(session.id)
     renamed_dir = Path.join(base_dir, "renamed")
     trimmed_dir = Path.join(base_dir, "trimmed")
     File.mkdir_p!(trimmed_dir)
 
+    flac_files = Prep.find_flac_files(renamed_dir)
+    wav_path = Path.join(base_dir, "merged.wav")
+    trimmed_wav = Path.join(trimmed_dir, "merged.wav")
+    trimmed_m4a = Path.join(trimmed_dir, "merged.m4a")
+    total = length(flac_files) + 2
+
     with :ok <-
-           precise_clip_all(
-             renamed_dir,
+           precise_clip_all_with_progress(
+             flac_files,
              trimmed_dir,
              session.campaign.player_map,
              start_seconds,
-             end_seconds
+             end_seconds,
+             total,
+             on_progress
            ),
-         :ok <-
-           precise_clip(
-             Path.join(base_dir, "merged.wav"),
-             Path.join(trimmed_dir, "merged.wav"),
-             start_seconds,
-             end_seconds
-           ) do
+         _ = on_progress.("merged.wav", {length(flac_files), total}),
+         :ok <- precise_clip(wav_path, trimmed_wav, start_seconds, end_seconds),
+         _ = on_progress.("merged.m4a", {length(flac_files) + 1, total}),
+         :ok <- convert_wav_to_m4a(trimmed_wav, trimmed_m4a) do
+      File.rm(trimmed_wav)
       :ok
     else
       error ->
@@ -111,6 +117,15 @@ defmodule Noter.Uploads do
     session_dir(session_id)
     |> Path.join("merged.wav")
     |> File.rm()
+  end
+
+  defp convert_wav_to_m4a(input, output) do
+    args = ["-y", "-i", input, "-c:a", "aac", "-b:a", "192k", output]
+
+    case System.cmd("ffmpeg", args, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {out, code} -> {:error, "ffmpeg wav→m4a failed (exit #{code}): #{out}"}
+    end
   end
 
   defp precise_clip(input, output, start_seconds, end_seconds) do
@@ -133,13 +148,22 @@ defmodule Noter.Uploads do
     end
   end
 
-  defp precise_clip_all(source_dir, output_dir, player_map, start_seconds, end_seconds) do
-    source_dir
-    |> Prep.find_flac_files()
-    |> Enum.reduce_while(:ok, fn path, :ok ->
+  defp precise_clip_all_with_progress(
+         flac_files,
+         output_dir,
+         player_map,
+         start_seconds,
+         end_seconds,
+         total,
+         on_progress
+       ) do
+    flac_files
+    |> Enum.with_index()
+    |> Enum.reduce_while(:ok, fn {path, index}, :ok ->
       basename = Path.basename(path, ".flac")
       character_name = Prep.resolve_character(basename, player_map)
       output_path = Path.join(output_dir, "#{character_name}.flac")
+      on_progress.("#{character_name}.flac", {index, total})
 
       case precise_clip(path, output_path, start_seconds, end_seconds) do
         :ok -> {:cont, :ok}
