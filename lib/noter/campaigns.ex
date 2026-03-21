@@ -6,6 +6,9 @@ defmodule Noter.Campaigns do
 
   def list_campaigns do
     Campaign
+    |> join(:left, [c], s in assoc(c, :sessions))
+    |> group_by([c], c.id)
+    |> select([c, s], %{c | session_count: count(s.id)})
     |> order_by(:name)
     |> Repo.all()
   end

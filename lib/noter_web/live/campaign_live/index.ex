@@ -25,6 +25,29 @@ defmodule NoterWeb.CampaignLive.Index do
           <h1 class="text-3xl font-bold">Campaigns</h1>
         </div>
 
+        <div :if={@campaigns_empty?} class="text-center py-12 text-base-content/50">
+          No campaigns yet. Create one below to get started.
+        </div>
+        <ul id="campaigns" phx-update="stream" class="list bg-base-200 rounded-box shadow-md">
+          <li :for={{id, campaign} <- @streams.campaigns} id={id} class="list-row">
+            <.link
+              navigate={~p"/campaigns/#{campaign.slug}"}
+              class="list-col-grow flex items-center justify-between hover:text-primary transition-colors"
+            >
+              <div>
+                <div class="text-lg font-semibold">{campaign.name}</div>
+                <div class="text-xs uppercase font-semibold opacity-60">
+                  {session_count_label(campaign.session_count)}
+                </div>
+              </div>
+              <.icon
+                name="hero-chevron-right"
+                class="size-5 text-base-content/30"
+              />
+            </.link>
+          </li>
+        </ul>
+
         <div class="card bg-base-200 shadow-sm">
           <div class="card-body">
             <h2 class="card-title text-lg">New Campaign</h2>
@@ -45,30 +68,14 @@ defmodule NoterWeb.CampaignLive.Index do
             </.form>
           </div>
         </div>
-
-        <div :if={@campaigns_empty?} class="text-center py-12 text-base-content/50">
-          No campaigns yet. Create one above to get started.
-        </div>
-        <div id="campaigns" phx-update="stream" class="flex flex-col gap-4">
-          <.link
-            :for={{id, campaign} <- @streams.campaigns}
-            id={id}
-            navigate={~p"/campaigns/#{campaign.slug}"}
-            class="flex items-center justify-between p-4 rounded-lg bg-base-100 border border-base-300 hover:border-primary/40 hover:bg-base-100/80 transition-all cursor-pointer group"
-          >
-            <span class="text-lg font-semibold group-hover:text-primary transition-colors">
-              {campaign.name}
-            </span>
-            <.icon
-              name="hero-chevron-right"
-              class="size-5 text-base-content/30 group-hover:text-primary transition-colors"
-            />
-          </.link>
-        </div>
       </div>
     </Layouts.app>
     """
   end
+
+  defp session_count_label(0), do: "No Sessions"
+  defp session_count_label(1), do: "1 Session"
+  defp session_count_label(count), do: "#{count} Sessions"
 
   @impl true
   def handle_event("validate", %{"campaign" => campaign_params}, socket) do

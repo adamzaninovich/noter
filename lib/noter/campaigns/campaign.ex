@@ -9,6 +9,8 @@ defmodule Noter.Campaigns.Campaign do
 
     has_many :sessions, Noter.Sessions.Session
 
+    field :session_count, :integer, virtual: true, default: 0
+
     timestamps()
   end
 

@@ -5,7 +5,10 @@
       "Bash(mix:*)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:daisyui.com)",
-      "mcp__tidewave__execute_sql_query"
+      "mcp__tidewave__execute_sql_query",
+      "WebSearch",
+      "WebFetch(domain:wavesurfer.xyz)",
+      "Bash(curl:*)"
     ]
   }
 }
