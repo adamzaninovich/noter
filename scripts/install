@@ -20,7 +20,7 @@ docker build -t noter:latest "$PROJECT_DIR"
 echo "==> Setting up $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR/uploads"
 
-SECRET_KEY_BASE="$(openssl rand -base64 48)"
+SECRET_KEY_BASE="$(docker run --rm noter:latest bin/noter eval 'IO.puts(:crypto.strong_rand_bytes(64) |> Base.encode64())')"
 
 cat > "$INSTALL_DIR/compose.yaml" << EOF
 services:
