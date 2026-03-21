@@ -185,8 +185,7 @@ defmodule Noter.Transcription.SSEClient do
       Sessions.get_session!(state.session_id),
       %{
         status: "transcribed",
-        transcript_json: encode_if_map(result),
-        transcript_srt: Map.get(result, "srt")
+        transcript_json: encode_if_map(result)
       }
     )
 

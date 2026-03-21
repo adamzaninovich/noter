@@ -37,7 +37,7 @@ defmodule Noter.Sessions.Session do
 
   def transcription_changeset(session, attrs) do
     session
-    |> cast(attrs, [:status, :transcription_job_id, :transcript_json, :transcript_srt])
+    |> cast(attrs, [:status, :transcription_job_id, :transcript_json])
     |> validate_required([:status])
     |> validate_inclusion(:status, @valid_statuses)
   end

@@ -770,8 +770,7 @@ defmodule NoterWeb.SessionLive.Show do
           {:ok, %{"status" => "done", "result" => result}} ->
             Sessions.update_transcription(session, %{
               status: "transcribed",
-              transcript_json: Jason.encode!(result),
-              transcript_srt: result["srt"]
+              transcript_json: Jason.encode!(result)
             })
 
             session = Sessions.get_session_with_campaign!(session.id)

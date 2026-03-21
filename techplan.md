@@ -53,7 +53,7 @@ Waveform UI for setting trim points, server-side peak generation, ffmpeg clippin
 - On trim success: status → `trimmed`, trim values persisted. On failure: status stays `uploaded`, error flash, `trimmed/` cleaned up
 - Reuses `Prep.find_flac_files/1`, `Prep.resolve_character/2`, `Uploads.session_dir/1`, existing background Task pattern
 
-## Phase 4 — Transcription Service Integration
+## Phase 4 — Transcription Service Integration ✅
 
 Send trimmed files to transcription API, stream SSE progress to UI.
 
@@ -76,23 +76,67 @@ Send trimmed files to transcription API, stream SSE progress to UI.
 - On page reload during transcription: check `transcription_job_id`, poll `/jobs/{job_id}` for current state, reconnect SSE if still running
 - Files to send: trimmed FLACs in `uploads/<session_id>/trimmed/` (filenames are already speaker labels like `Adam.flac`)
 
-## Phase 5 — Transcript Review & Corrections
+## Phase 5a — Transcription Cleanup ✅
 
-Inline editing UI for SRT segments, corrections map.
+Remove SRT storage from transcription ingest; SRT is fully derivable from JSON segments and should only be generated at finalize time.
 
-- Parse SRT into list of segments (index, timestamp, speaker, text)
-- Render scrollable segment list — each segment has editable text field
-- On edit: store correction in session `corrections` map
-- Show diff/highlight for corrected segments
-- "Finalize" button applies corrections and transitions to `done`
-- Transition session status `transcribed → reviewing → done`
+- Stop saving `transcript_srt` during transcription (SSE `done` handler, poll fallback)
+- Clear any existing `transcript_srt` values if desired (migration or manual)
+- Verify `transcript_json` contains all necessary data: `segments: [{start, end, text, speaker, words}]`
+- Remove any UI that references raw SRT data in the transcription step
+
+## Phase 5b — Transcript Viewer, Audio Playback & Replacements
+
+Scrollable transcript viewer with audio playback and global find-and-replace corrections for TTRPG names/terms.
+
+**Data model:**
+- `corrections` map on session schema: `%{"replacements" => %{"Lys" => "Liss", ...}, "edits" => %{...}}`
+- Replacements: whole-word, case-insensitive matching, replaces with exact casing as entered
+- Persisted to database as changes are made (no separate "save" step) — user can close the page and resume later
+
+**Transcript viewer:**
+- Parse `transcript_json` segments into speaker turns (group consecutive same-speaker segments)
+- Each turn shows: time range, speaker badge, combined text
+- Scrollable list — sessions are 3-4 hours, so the transcript is long
+- Replaced words are highlighted (e.g. background color) so corrections are visible in context
+- Words have a subtle border on hover; clicking a word opens the replacements panel pre-filled with that word as the "find" value
+
+**Audio playback:**
+- Simple HTML `<audio>` element loaded with merged trimmed audio (already served at `/sessions/:id/audio/merged`)
+- Each turn has a play/pause button — click to seek to `turn.start` and play, click again to pause
+- Auto-stop at `turn.end`; button returns to play state
+- No waveform needed — just click-to-hear for verification
+
+**Replacements panel (sidebar):**
+- List of find → replace pairs with add/remove
+- Show match count per pair across the transcript
+- Replacements apply live to the transcript viewer as a preview, with replaced words highlighted
+- Whole-word matching only; possessives must be added as separate entries
+- On first replacement or edit, transition status `transcribed → reviewing`
+
+## Phase 5c — Per-Turn Editing & Finalize
+
+Inline editing of individual speaker turns and final output generation.
+
+**Per-turn editing:**
+- Edit button on any turn → inline text editing of the full turn text
+- Edits stored in `corrections.edits` keyed by segment range (e.g. `"0:14"`)
+- Edited turns get a visual indicator distinguishing them from replacement-only changes
+- Editing a turn means its underlying segments will be merged into one segment in the final JSON (sub-segment timing is lost only for hand-edited turns)
+
+**Finalize & output generation:**
+- "Finalize" button applies all corrections to produce final outputs:
+  - **JSON**: apply replacements across all segments, merge segments for edited turns with corrected text, preserve original segment granularity for unedited turns
+  - **SRT**: generate from corrected JSON, grouped by speaker turn (each entry = one speaker turn with speaker label, readable as a script)
+  - `segments_to_srt/1` function builds SRT from corrected segment data
+- Store corrected `transcript_json` and generated `transcript_srt` on session
+- Transition status `reviewing → done`
 
 ## Phase 6 — Download & Polish
 
 Package results into downloadable zip, UI polish.
 
 - Build zip on the fly: trimmed audio, corrected transcripts, vocab
-- Apply corrections to SRT and JSON content before writing to zip
 - Serve via controller endpoint (`GET /sessions/:id/download`)
 - Session workspace "Done" step shows download button and summary
 - Polish: step indicator/breadcrumb in session workspace, loading states, error handling
