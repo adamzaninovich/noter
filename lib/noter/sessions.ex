@@ -52,4 +52,31 @@ defmodule Noter.Sessions do
   def change_session(%Session{} = session, attrs \\ %{}) do
     Session.changeset(session, attrs)
   end
+
+  def update_corrections(%Session{} = session, corrections_map) do
+    status =
+      if session.status == "transcribed", do: "reviewing", else: session.status
+
+    session
+    |> Session.corrections_changeset(%{corrections: corrections_map, status: status})
+    |> Repo.update()
+  end
+
+  def add_replacement(%Session{} = session, find, replace) do
+    replacements =
+      session.corrections
+      |> Map.get("replacements", %{})
+      |> Map.put(find, replace)
+
+    update_corrections(session, Map.put(session.corrections, "replacements", replacements))
+  end
+
+  def remove_replacement(%Session{} = session, find) do
+    replacements =
+      session.corrections
+      |> Map.get("replacements", %{})
+      |> Map.delete(find)
+
+    update_corrections(session, Map.put(session.corrections, "replacements", replacements))
+  end
 end

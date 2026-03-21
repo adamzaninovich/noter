@@ -23,6 +23,7 @@ defmodule NoterWeb.Router do
     live "/campaigns/:campaign_slug/sessions/:session_slug", SessionLive.Show
 
     get "/sessions/:session_id/audio/merged", AudioController, :merged
+    get "/sessions/:session_id/audio/trimmed", AudioController, :trimmed_merged
     get "/sessions/:session_id/audio/peaks", AudioController, :peaks
   end
 

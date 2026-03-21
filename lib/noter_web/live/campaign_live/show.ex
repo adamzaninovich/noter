@@ -264,7 +264,7 @@ defmodule NoterWeb.CampaignLive.Show do
   defp status_badge_class(status) do
     case status do
       "done" -> "badge-success"
-      status when status in ~w(uploading transcribing) -> "badge-info"
+      status when status in ~w(uploading transcribing reviewing) -> "badge-info"
       _ -> "badge-soft badge-info"
     end
   end

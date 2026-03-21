@@ -4,6 +4,7 @@ defmodule NoterWeb.SessionLive.Show do
   alias Noter.Sessions
   alias Noter.Uploads
   alias Noter.Transcription
+  alias Noter.Transcription.Transcript
 
   @steps [
     {"uploading", "Upload"},
@@ -40,6 +41,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign_audio_urls(session)
       |> retry_peaks_if_needed(session)
       |> reconnect_transcription(session)
+      |> assign_review_state(session)
 
     {:ok, socket}
   end
@@ -47,7 +49,7 @@ defmodule NoterWeb.SessionLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} wide={@reviewing?}>
       <div class="space-y-6">
         <%!-- Header with breadcrumb --%>
         <div class="flex items-center gap-3">
@@ -278,6 +280,94 @@ defmodule NoterWeb.SessionLive.Show do
                   </p>
                 </div>
               <% end %>
+            </div>
+          </div>
+        <% end %>
+
+        <%!-- Transcript review card --%>
+        <%= if @reviewing? do %>
+          <div class="card bg-base-200 shadow-sm">
+            <div class="card-body">
+              <h2 class="card-title text-lg">Transcript Review</h2>
+              <p class="text-sm text-base-content/60 mb-2">
+                Click any word to prefill the find field. Add replacements to fix transcription errors.
+              </p>
+              <div class="flex gap-6">
+                <%!-- Left: transcript viewer --%>
+                <div class="flex-1 min-w-0 space-y-3">
+                  <div
+                    id="transcript-audio"
+                    phx-hook=".TranscriptAudio"
+                    phx-update="ignore"
+                  >
+                    <audio id="trimmed-audio" preload="metadata" src={@trimmed_audio_url}></audio>
+                  </div>
+
+                  <div
+                    id="turns"
+                    phx-update="stream"
+                    class="space-y-2 max-h-[70vh] overflow-y-auto pr-1"
+                  >
+                    <div :for={{id, turn} <- @streams.turns} id={id}>
+                      {turn_row(%{turn: turn, speaker_colors: @speaker_colors})}
+                    </div>
+                  </div>
+                </div>
+
+                <%!-- Right: replacements panel --%>
+                <div class="w-80 shrink-0 flex flex-col max-h-[70vh]">
+                  <.form
+                    for={@replacement_form}
+                    id="replacement-form"
+                    phx-submit="add_replacement"
+                    phx-change="validate_replacement"
+                    class="shrink-0 mb-4"
+                  >
+                    <div class="flex items-center gap-2 [&_.fieldset]:mb-0">
+                      <.input
+                        field={@replacement_form[:find]}
+                        placeholder="Find..."
+                        class="input input-sm input-bordered flex-1"
+                      />
+                      <.input
+                        field={@replacement_form[:replace]}
+                        placeholder="Replace..."
+                        class="input input-sm input-bordered flex-1"
+                      />
+                      <button type="submit" class="btn btn-primary btn-sm">Add</button>
+                    </div>
+                  </.form>
+
+                  <%= if @replacements != %{} do %>
+                    <div class="text-xs font-semibold text-base-content/60 uppercase tracking-wide shrink-0 mb-1">
+                      Active Replacements
+                    </div>
+                    <div class="overflow-y-auto space-y-1 pr-1">
+                      <%= for {find, replace} <- @replacements do %>
+                        <div class="flex items-center gap-2 bg-base-100 rounded-lg px-3 py-2 text-sm">
+                          <span class="font-mono text-error/70">{find}</span>
+                          <.icon
+                            name="hero-arrow-right-micro"
+                            class="size-4 text-base-content/40 shrink-0"
+                          />
+                          <span class="font-mono font-medium text-success">{replace}</span>
+                          <span class="badge badge-xs badge-ghost ml-auto">
+                            {Map.get(@match_counts, find, 0)}
+                          </span>
+                          <button
+                            type="button"
+                            phx-click="remove_replacement"
+                            phx-value-find={find}
+                            class="btn btn-ghost btn-xs text-error"
+                          >
+                            <.icon name="hero-x-mark-micro" class="size-4" />
+                          </button>
+                        </div>
+                      <% end %>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
             </div>
           </div>
         <% end %>
@@ -513,6 +603,80 @@ defmodule NoterWeb.SessionLive.Show do
         }
       }
     </script>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".TranscriptAudio">
+      export default {
+        mounted() {
+          const audio = document.getElementById("trimmed-audio")
+          if (!audio) return
+
+          this.audio = audio
+          this.currentTurnEnd = null
+          this.activeBtn = null
+
+          // Delegate clicks on play-turn buttons (event delegation on document
+          // since the turns container is a LiveView stream that gets re-rendered)
+          this._clickHandler = (e) => {
+            const btn = e.target.closest("[data-play-turn]")
+            if (!btn) return
+
+            const start = parseFloat(btn.dataset.turnStart)
+            const end = parseFloat(btn.dataset.turnEnd)
+
+            if (this.activeBtn === btn && !audio.paused) {
+              audio.pause()
+              this._setIcon(btn, "play")
+              this.activeBtn = null
+              return
+            }
+
+            // Pause previous
+            if (this.activeBtn && this.activeBtn !== btn) {
+              this._setIcon(this.activeBtn, "play")
+            }
+
+            audio.currentTime = start
+            this.currentTurnEnd = end
+            this.activeBtn = btn
+            this._setIcon(btn, "pause")
+            audio.play()
+          }
+          document.addEventListener("click", this._clickHandler)
+
+          audio.addEventListener("timeupdate", () => {
+            if (this.currentTurnEnd !== null && audio.currentTime >= this.currentTurnEnd) {
+              audio.pause()
+              if (this.activeBtn) {
+                this._setIcon(this.activeBtn, "play")
+                this.activeBtn = null
+              }
+              this.currentTurnEnd = null
+            }
+          })
+
+          audio.addEventListener("pause", () => {
+            if (this.activeBtn) {
+              this._setIcon(this.activeBtn, "play")
+            }
+          })
+        },
+
+        _setIcon(btn, state) {
+          const icon = btn.querySelector("[data-play-icon]")
+          if (!icon) return
+          if (state === "pause") {
+            icon.classList.remove("hero-play-solid")
+            icon.classList.add("hero-pause-solid")
+          } else {
+            icon.classList.remove("hero-pause-solid")
+            icon.classList.add("hero-play-solid")
+          }
+        },
+
+        destroyed() {
+          if (this._clickHandler) document.removeEventListener("click", this._clickHandler)
+        }
+      }
+    </script>
     """
   end
 
@@ -528,6 +692,71 @@ defmodule NoterWeb.SessionLive.Show do
     </div>
     """
   end
+
+  defp turn_row(assigns) do
+    ~H"""
+    <div class="flex items-start gap-2 py-2 px-2 rounded-lg hover:bg-base-100 transition-colors">
+      <button
+        type="button"
+        data-play-turn
+        data-turn-start={@turn.start}
+        data-turn-end={@turn.end}
+        class="btn btn-ghost btn-xs mt-0.5 shrink-0"
+      >
+        <span data-play-icon class="hero-play-solid size-3"></span>
+      </button>
+      <span class="badge badge-ghost badge-sm font-mono mt-0.5 shrink-0">
+        {format_time(@turn.start)}
+      </span>
+      <span class={[
+        "badge badge-sm mt-0.5 shrink-0",
+        Map.get(@speaker_colors, @turn.speaker, "badge-neutral")
+      ]}>
+        {@turn.speaker}
+      </span>
+      <p class="text-sm leading-relaxed flex-1">
+        <%= for word <- @turn.display_words do %>
+          {leading_space(word.word)}<span
+            class={[
+              "cursor-pointer hover:outline hover:outline-1 hover:outline-base-content/20 rounded-sm",
+              word.replaced? && "bg-success/20 text-success font-medium"
+            ]}
+            phx-click="prefill_replacement"
+            phx-value-word={strip_display_word(word.word)}
+          >{String.trim_leading(word.word)}</span>
+        <% end %>
+      </p>
+    </div>
+    """
+  end
+
+  defp format_time(seconds) when is_number(seconds) do
+    total = trunc(seconds)
+    h = div(total, 3600)
+    m = div(rem(total, 3600), 60)
+    s = rem(total, 60)
+
+    [h, m, s]
+    |> Enum.map(&String.pad_leading(Integer.to_string(&1), 2, "0"))
+    |> Enum.join(":")
+  end
+
+  defp format_time(_), do: "00:00:00"
+
+  defp leading_space(word) do
+    case Regex.run(~r/\A(\s+)/, word) do
+      [_, ws] -> ws
+      _ -> ""
+    end
+  end
+
+  defp strip_display_word(word) do
+    word
+    |> String.trim_leading()
+    |> String.replace(~r/[.,;:!?\-"')\]]+\z/, "")
+  end
+
+  @speaker_palette ~w(badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error)
 
   @status_order ~w(uploading uploaded trimmed transcribing transcribed reviewing done)
 
@@ -552,7 +781,7 @@ defmodule NoterWeb.SessionLive.Show do
   defp status_badge_class(status) do
     case status do
       "done" -> "badge-success"
-      status when status in ~w(uploading transcribing) -> "badge-info"
+      status when status in ~w(uploading transcribing reviewing) -> "badge-info"
       _ -> "badge-soft badge-info"
     end
   end
@@ -615,6 +844,56 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:transcribing?, true)
      |> assign(:transcription_progress, nil)
      |> assign(:transcription_status, :uploading)}
+  end
+
+  def handle_event(
+        "add_replacement",
+        %{"replacement" => %{"find" => find, "replace" => replace}},
+        socket
+      ) do
+    find = String.trim(find)
+    replace = String.trim(replace)
+
+    cond do
+      find == "" ->
+        {:noreply, put_flash(socket, :error, "Find field cannot be empty.")}
+
+      find == replace ->
+        {:noreply, put_flash(socket, :error, "Find and replace values must be different.")}
+
+      true ->
+        session = socket.assigns.session
+
+        case Sessions.add_replacement(session, find, replace) do
+          {:ok, session} ->
+            {:noreply, recompute_review(socket, session)}
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Failed to save replacement.")}
+        end
+    end
+  end
+
+  def handle_event("remove_replacement", %{"find" => find}, socket) do
+    session = socket.assigns.session
+
+    case Sessions.remove_replacement(session, find) do
+      {:ok, session} ->
+        {:noreply, recompute_review(socket, session)}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to remove replacement.")}
+    end
+  end
+
+  def handle_event("validate_replacement", %{"replacement" => params}, socket) do
+    form = to_form(params, as: :replacement)
+    {:noreply, assign(socket, :replacement_form, form)}
+  end
+
+  def handle_event("prefill_replacement", %{"word" => word}, socket) do
+    form = to_form(%{"find" => word, "replace" => ""}, as: :replacement)
+    {:noreply, assign(socket, :replacement_form, form)}
   end
 
   def handle_event("delete_session", _params, socket) do
@@ -743,6 +1022,7 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:session, session)
      |> assign(:transcribing?, false)
      |> assign(:transcription_progress, nil)
+     |> assign_review_state(session)
      |> put_flash(:info, "Transcription complete.")}
   end
 
@@ -843,5 +1123,57 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:audio_url, nil)
       |> assign(:peaks_url, nil)
     end
+  end
+
+  defp assign_review_state(socket, session) do
+    if session.status in ~w(transcribed reviewing) do
+      raw_turns = Transcript.parse_turns(session.transcript_json)
+      replacements = Map.get(session.corrections, "replacements", %{})
+      display_turns = Transcript.apply_replacements(raw_turns, replacements)
+      match_counts = Transcript.match_counts(raw_turns, replacements)
+      speakers = raw_turns |> Enum.map(& &1.speaker) |> Enum.uniq()
+      speaker_colors = build_speaker_colors(speakers)
+
+      socket
+      |> assign(:reviewing?, true)
+      |> assign(:raw_turns, raw_turns)
+      |> assign(:replacements, replacements)
+      |> assign(:match_counts, match_counts)
+      |> assign(:speaker_colors, speaker_colors)
+      |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
+      |> assign(:trimmed_audio_url, ~p"/sessions/#{session.id}/audio/trimmed")
+      |> stream(:turns, display_turns, reset: true)
+    else
+      socket
+      |> assign(:reviewing?, false)
+      |> assign(:raw_turns, [])
+      |> assign(:replacements, %{})
+      |> assign(:match_counts, %{})
+      |> assign(:speaker_colors, %{})
+      |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
+      |> assign(:trimmed_audio_url, nil)
+    end
+  end
+
+  defp recompute_review(socket, session) do
+    raw_turns = socket.assigns.raw_turns
+    replacements = Map.get(session.corrections, "replacements", %{})
+    display_turns = Transcript.apply_replacements(raw_turns, replacements)
+    match_counts = Transcript.match_counts(raw_turns, replacements)
+
+    socket
+    |> assign(:session, session)
+    |> assign(:replacements, replacements)
+    |> assign(:match_counts, match_counts)
+    |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
+    |> stream(:turns, display_turns, reset: true)
+  end
+
+  defp build_speaker_colors(speakers) do
+    speakers
+    |> Enum.with_index()
+    |> Enum.into(%{}, fn {speaker, idx} ->
+      {speaker, Enum.at(@speaker_palette, rem(idx, length(@speaker_palette)))}
+    end)
   end
 end

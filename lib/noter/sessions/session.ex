@@ -42,6 +42,13 @@ defmodule Noter.Sessions.Session do
     |> validate_inclusion(:status, @valid_statuses)
   end
 
+  def corrections_changeset(session, attrs) do
+    session
+    |> cast(attrs, [:corrections, :status])
+    |> validate_required([:status])
+    |> validate_inclusion(:status, @valid_statuses)
+  end
+
   defp generate_slug(changeset) do
     case get_change(changeset, :name) do
       nil -> changeset

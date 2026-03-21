@@ -13,6 +13,16 @@ defmodule NoterWeb.AudioController do
     end
   end
 
+  def trimmed_merged(conn, %{"session_id" => session_id}) do
+    path = Path.join([Uploads.session_dir(session_id), "trimmed", "merged.m4a"])
+
+    if File.exists?(path) do
+      send_file_with_range(conn, path, "audio/mp4")
+    else
+      send_resp(conn, 404, "Not found")
+    end
+  end
+
   def peaks(conn, %{"session_id" => session_id}) do
     path = Path.join(Uploads.session_dir(session_id), "peaks.json")
 
