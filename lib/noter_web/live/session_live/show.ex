@@ -27,7 +27,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:session, session)
       |> assign(:campaign, session.campaign)
       |> assign(:renamed_files, renamed_files)
-      |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.wav")))
+      |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.aac")))
       |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
       |> assign(:steps, @steps)
       |> assign(:processing?, false)
@@ -247,11 +247,17 @@ defmodule NoterWeb.SessionLive.Show do
                 </div>
 
                 <div class="flex flex-wrap items-center gap-2 mt-4">
+                  <button data-set-start type="button" class="btn btn-outline btn-sm">
+                    <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" /> Set Start
+                  </button>
                   <button data-preview-start type="button" class="btn btn-outline btn-sm">
                     <.icon name="hero-play" class="size-4" /> Preview Start
                   </button>
                   <button data-preview-end type="button" class="btn btn-outline btn-sm">
                     Preview End <.icon name="hero-play" class="size-4" />
+                  </button>
+                  <button data-set-end type="button" class="btn btn-outline btn-sm">
+                    Set End <.icon name="hero-arrow-left-end-on-rectangle" class="size-4" />
                   </button>
                 </div>
               </div>
@@ -339,10 +345,178 @@ defmodule NoterWeb.SessionLive.Show do
       </div>
     </Layouts.app>
     <script :type={Phoenix.LiveView.ColocatedHook} name=".Waveform">
-      // TODO: implement per TRIM-SPEC.md
+      import WaveSurfer from "wavesurfer.js"
+      import RegionsPlugin from "wavesurfer.js/dist/plugins/regions.esm.js"
+
+      function formatTime(seconds) {
+        const h = Math.floor(seconds / 3600)
+        const m = Math.floor((seconds % 3600) / 60)
+        const s = Math.floor(seconds % 60)
+        return [h, m, s].map(v => String(v).padStart(2, "0")).join(":")
+      }
+
+      function updateLabels(el, region, duration) {
+        el.querySelector("[data-trim-start-display]").textContent = formatTime(region.start)
+        el.querySelector("[data-trim-end-display]").textContent = formatTime(region.end)
+        const keeping = region.end - region.start
+        el.querySelector("[data-keeping-display]").textContent =
+          `Keeping ${formatTime(keeping)} of ${formatTime(duration)}`
+      }
+
       export default {
-        mounted() {},
-        destroyed() {}
+        mounted() {
+          const el = this.el
+          const audioUrl = el.dataset.audioUrl
+          const peaksUrl = el.dataset.peaksUrl
+          const trimStart = parseFloat(el.dataset.trimStart)
+          const trimEnd = parseFloat(el.dataset.trimEnd)
+          const container = el.querySelector("[data-waveform]")
+
+          fetch(peaksUrl)
+            .then(r => r.json())
+            .then(peaksData => {
+              const divisor = 1 << (peaksData.bits - 1)
+              const normalized = peaksData.data.map(v => v / divisor)
+              const duration = (peaksData.length * peaksData.samples_per_pixel) / peaksData.sample_rate
+
+              const regions = RegionsPlugin.create()
+              const fitZoom = (container.clientWidth - 16) / duration
+              const maxZoom = 50
+
+              const ws = WaveSurfer.create({
+                container,
+                url: audioUrl,
+                peaks: [normalized],
+                duration,
+                plugins: [regions],
+                minPxPerSec: fitZoom,
+                waveColor: "#a0aec0",
+                progressColor: "#667eea",
+                cursorColor: "#667eea",
+                height: 128,
+              })
+
+              this.ws = ws
+              this.regions = regions
+
+              ws.on("decode", () => {
+                const region = regions.addRegion({
+                  start: trimStart,
+                  end: trimEnd,
+                  color: "rgba(102, 126, 234, 0.2)",
+                  drag: true,
+                  resize: true,
+                })
+                this.region = region
+                updateLabels(el, region, duration)
+              })
+
+              regions.on("region-update", (region) => {
+                updateLabels(el, region, duration)
+              })
+
+              regions.on("region-updated", (region) => {
+                this.pushEvent("trim_region_updated", {
+                  start: region.start,
+                  end: region.end,
+                })
+              })
+
+              // Zoom slider
+              const zoomSlider = el.querySelector("[data-zoom]")
+              zoomSlider.oninput = (e) => {
+                const pct = Number(e.target.value) / 100
+                const zoom = fitZoom + pct * (maxZoom - fitZoom)
+                ws.zoom(zoom)
+              }
+
+              // Play/pause
+              const playPauseBtn = el.querySelector("[data-play-pause]")
+              const playIcon = el.querySelector("[data-play-icon]")
+              const pauseIcon = el.querySelector("[data-pause-icon]")
+
+              const doPlayPause = () => {
+                if (this.region && !ws.isPlaying()) {
+                  const current = ws.getCurrentTime()
+                  if (current < this.region.start || current >= this.region.end) {
+                    ws.setTime(this.region.start)
+                  }
+                }
+                ws.playPause()
+              }
+
+              playPauseBtn.addEventListener("click", doPlayPause)
+
+              this._keyHandler = (e) => {
+                if (e.code === "Space" && !["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) {
+                  e.preventDefault()
+                  doPlayPause()
+                }
+              }
+              document.addEventListener("keydown", this._keyHandler)
+
+              ws.on("play", () => {
+                playIcon.classList.add("hidden")
+                pauseIcon.classList.remove("hidden")
+              })
+
+              ws.on("pause", () => {
+                playIcon.classList.remove("hidden")
+                pauseIcon.classList.add("hidden")
+              })
+
+              ws.on("timeupdate", (currentTime) => {
+                el.querySelector("[data-current-time]").textContent = formatTime(currentTime)
+                if (this.region && currentTime >= this.region.end && ws.isPlaying()) {
+                  ws.pause()
+                }
+              })
+
+              // Preview buttons
+              el.querySelector("[data-preview-start]").addEventListener("click", () => {
+                if (this.region) {
+                  ws.setTime(this.region.start)
+                  ws.play()
+                }
+              })
+
+              el.querySelector("[data-preview-end]").addEventListener("click", () => {
+                if (this.region) {
+                  const seekTo = Math.max(this.region.start, this.region.end - 3)
+                  ws.setTime(seekTo)
+                  ws.play()
+                }
+              })
+
+              // Set region start/end to current playhead
+              el.querySelector("[data-set-start]").addEventListener("click", () => {
+                if (this.region) {
+                  const t = ws.getCurrentTime()
+                  if (t < this.region.end) {
+                    this.region.setOptions({ start: t })
+                    updateLabels(el, this.region, duration)
+                    this.pushEvent("trim_region_updated", { start: this.region.start, end: this.region.end })
+                  }
+                }
+              })
+
+              el.querySelector("[data-set-end]").addEventListener("click", () => {
+                if (this.region) {
+                  const t = ws.getCurrentTime()
+                  if (t > this.region.start) {
+                    this.region.setOptions({ end: t })
+                    updateLabels(el, this.region, duration)
+                    this.pushEvent("trim_region_updated", { start: this.region.start, end: this.region.end })
+                  }
+                }
+              })
+            })
+        },
+
+        destroyed() {
+          if (this.ws) this.ws.destroy()
+          if (this._keyHandler) document.removeEventListener("keydown", this._keyHandler)
+        }
       }
     </script>
     """
@@ -477,7 +651,7 @@ defmodule NoterWeb.SessionLive.Show do
      socket
      |> assign(:session, session)
      |> assign(:renamed_files, renamed_files)
-     |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.wav")))
+     |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.aac")))
      |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
      |> assign(:trim_start, nil)
      |> assign(:trim_end, nil)

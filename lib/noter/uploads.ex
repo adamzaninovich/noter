@@ -118,14 +118,12 @@ defmodule Noter.Uploads do
 
     args = [
       "-y",
-      "-i",
-      input,
       "-ss",
       to_string(start_seconds),
+      "-i",
+      input,
       "-t",
       to_string(duration),
-      "-af",
-      "atrim=0:#{duration},asetpts=PTS-STARTPTS",
       output
     ]
 

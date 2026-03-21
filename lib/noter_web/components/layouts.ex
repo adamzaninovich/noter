@@ -35,7 +35,7 @@ defmodule NoterWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8 bg-base-200 border-b border-base-300">
+    <header :if={false} class="navbar px-4 sm:px-6 lg:px-8 bg-base-200 border-b border-base-300">
       <div class="flex-1">
         <a
           href="/"

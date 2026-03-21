@@ -28,7 +28,7 @@ Session creation, file uploads, FLAC extraction and renaming.
 - Transition session status `uploading → uploaded`
 - Route: `/campaigns/:campaign_id/sessions/new` and `/campaigns/:campaign_id/sessions/:id`
 
-## Phase 3 — Audio Trimming
+## Phase 3 — Audio Trimming ✅
 
 Waveform UI for setting trim points, server-side peak generation, ffmpeg clipping with sample-accurate boundaries. Files are 3-4 hours long so browser decoding is not viable — precomputed peaks via `audiowaveform` are used instead.
 
@@ -55,14 +55,26 @@ Waveform UI for setting trim points, server-side peak generation, ffmpeg clippin
 
 ## Phase 4 — Transcription Service Integration
 
-Send files to transcription API, stream SSE progress to UI.
+Send trimmed files to transcription API, stream SSE progress to UI.
 
-- Config: `:noter, :transcription_url`
-- `Noter.Transcription` module — POST job with multipart files, parse response
-- `Noter.Transcription.SSEClient` — GenServer that connects to SSE endpoint, broadcasts progress via PubSub
-- LiveView subscribes to PubSub topic for the job, renders live progress (file name, percentage)
-- On `done` event: store `transcript_json` and `transcript_srt` on session
-- Transition session status `trimmed → transcribing → transcribed`
+**API:** `http://tycho.protogen.cloud:8000` (see `transcription-api-docs.md`)
+- `POST /jobs` — multipart `files[]` (one FLAC per speaker + optional vocab.txt) → `{"job_id": "..."}`
+- `GET /jobs/{job_id}/events` — SSE stream: `queued` → `file_start` → `progress` (pct 0-100 per file) → `file_done` → `done` (contains full result) or `error`
+- `GET /jobs/{job_id}` — polling fallback, returns `{status, result, error}`
+- Result object: `{speakers, duration, segments: [{start, end, text, speaker, words}], srt}`
+- Overall progress: `(completed_files + current_pct / 100) / total_files * 100`
+
+**Implementation:**
+- Config: `:noter, :transcription_url` (default `http://tycho.protogen.cloud:8000`)
+- `Noter.Transcription.submit_job/1` — POST trimmed FLACs from `trimmed/` dir + vocab.txt via Req multipart. Returns `{:ok, job_id}`
+- `Noter.Transcription.SSEClient` — GenServer that connects to `/jobs/{job_id}/events` via Req streaming, parses SSE lines, broadcasts events via PubSub (`"transcription:#{session_id}"`)
+- Session schema already has `transcription_job_id`, `transcript_json`, `transcript_srt` columns
+- LiveView "Transcribe" button: submits job, stores `job_id`, sets status `trimmed → transcribing`, starts SSEClient, subscribes to PubSub
+- LiveView renders progress UI: current file name, per-file progress bar, overall progress
+- On `done` event: store `transcript_json` (JSON-encoded segments) and `transcript_srt` on session, status → `transcribed`
+- On `error` event: flash error, status stays `transcribing` (allow retry)
+- On page reload during transcription: check `transcription_job_id`, poll `/jobs/{job_id}` for current state, reconnect SSE if still running
+- Files to send: trimmed FLACs in `uploads/<session_id>/trimmed/` (filenames are already speaker labels like `Adam.flac`)
 
 ## Phase 5 — Transcript Review & Corrections
 
