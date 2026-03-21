@@ -288,7 +288,32 @@ defmodule NoterWeb.SessionLive.Show do
         <%= if @reviewing? do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
-              <h2 class="card-title text-lg">Transcript Review</h2>
+              <div class="flex items-center justify-between">
+                <h2 class="card-title text-lg">Transcript Review</h2>
+                <div class="flex items-center gap-2">
+                  <%= if @session.status == "done" do %>
+                    <span class="badge badge-success gap-1">
+                      <.icon name="hero-check-circle-mini" class="size-4" /> Finalized
+                    </span>
+                    <button
+                      id="unfinalize-btn"
+                      phx-click="unfinalize"
+                      class="btn btn-outline btn-sm"
+                    >
+                      Back to Review
+                    </button>
+                  <% else %>
+                    <button
+                      id="finalize-btn"
+                      phx-click="finalize"
+                      class="btn btn-success btn-sm"
+                      phx-disable-with="Finalizing..."
+                    >
+                      <.icon name="hero-check-circle-mini" class="size-4" /> Finalize
+                    </button>
+                  <% end %>
+                </div>
+              </div>
               <p class="text-sm text-base-content/60 mb-2">
                 Click any word to prefill the find field. Add replacements to fix transcription errors.
               </p>
@@ -308,7 +333,7 @@ defmodule NoterWeb.SessionLive.Show do
                     phx-update="stream"
                     class="space-y-2 max-h-[70vh] overflow-y-auto pr-1"
                   >
-                    <div :for={{id, turn} <- @streams.turns} id={id}>
+                    <div :for={{id, turn} <- @streams.turns} id={id} class="group">
                       {turn_row(%{turn: turn, speaker_colors: @speaker_colors})}
                     </div>
                   </div>
@@ -695,7 +720,11 @@ defmodule NoterWeb.SessionLive.Show do
 
   defp turn_row(assigns) do
     ~H"""
-    <div class="flex items-start gap-2 py-2 px-2 rounded-lg hover:bg-base-100 transition-colors">
+    <div class={[
+      "flex items-start gap-2 py-2 px-2 rounded-lg transition-colors",
+      @turn.edited? && "border-l-2 border-info",
+      !@turn.editing? && "hover:bg-base-100"
+    ]}>
       <button
         type="button"
         data-play-turn
@@ -714,18 +743,94 @@ defmodule NoterWeb.SessionLive.Show do
       ]}>
         {@turn.speaker}
       </span>
-      <p class="text-sm leading-relaxed flex-1">
-        <%= for word <- @turn.display_words do %>
-          {leading_space(word.word)}<span
-            class={[
-              "cursor-pointer hover:outline hover:outline-1 hover:outline-base-content/20 rounded-sm",
-              word.replaced? && "bg-success/20 text-success font-medium"
-            ]}
-            phx-click="prefill_replacement"
-            phx-value-word={strip_display_word(word.word)}
-          >{String.trim_leading(word.word)}</span>
-        <% end %>
-      </p>
+      <%= if @turn.editing? do %>
+        <div class="flex-1">
+          <.form
+            for={@turn.edit_form}
+            id={"edit-form-#{@turn.id}"}
+            phx-submit="save_edit"
+            class="space-y-2"
+          >
+            <.input
+              field={@turn.edit_form[:text]}
+              type="textarea"
+              class="textarea textarea-bordered textarea-sm w-full"
+              rows="3"
+            />
+            <div class="flex items-center gap-2">
+              <button type="submit" class="btn btn-primary btn-xs">Save</button>
+              <button type="button" phx-click="cancel_edit" class="btn btn-ghost btn-xs">
+                Cancel
+              </button>
+            </div>
+          </.form>
+        </div>
+      <% else %>
+        <div class="flex-1 flex items-start gap-1">
+          <p class="text-sm leading-relaxed flex-1">
+            <%= cond do %>
+              <% @turn.deleted? -> %>
+                <span class="italic text-base-content/40">deleted</span>
+              <% @turn.edited? -> %>
+                <span class="text-info">{hd(@turn.display_words).word}</span>
+              <% true -> %>
+                <%= for word <- @turn.display_words do %>
+                  {leading_space(word.word)}<span
+                    class={[
+                      "cursor-pointer hover:outline hover:outline-1 hover:outline-base-content/20 rounded-sm",
+                      word.replaced? && "bg-success/20 text-success font-medium"
+                    ]}
+                    phx-click="prefill_replacement"
+                    phx-value-word={strip_display_word(word.word)}
+                  >{String.trim_leading(word.word)}</span>
+                <% end %>
+            <% end %>
+          </p>
+          <div class="flex items-center gap-0.5 shrink-0 mt-0.5">
+            <%= if @turn.edited? or @turn.deleted? do %>
+              <span class={[
+                "badge badge-xs",
+                if(@turn.deleted?, do: "badge-error", else: "badge-info")
+              ]}>
+                {if(@turn.deleted?, do: "deleted", else: "edited")}
+              </span>
+              <button
+                type="button"
+                phx-click="remove_edit"
+                phx-value-turn-id={@turn.id}
+                class="btn btn-ghost btn-xs text-warning"
+                title="Revert"
+              >
+                <.icon name="hero-arrow-uturn-left-mini" class="size-3" />
+              </button>
+            <% end %>
+            <%= if not @turn.deleted? do %>
+              <button
+                type="button"
+                phx-click="start_edit"
+                phx-value-turn-id={@turn.id}
+                class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100"
+                title="Edit turn"
+              >
+                <.icon name="hero-pencil-square-mini" class="size-3" />
+              </button>
+            <% end %>
+            <button
+              type="button"
+              phx-click="delete_turn"
+              phx-value-turn-id={@turn.id}
+              class={[
+                "btn btn-ghost btn-xs text-error",
+                !@turn.deleted? && "opacity-0 group-hover:opacity-100"
+              ]}
+              title={if(@turn.deleted?, do: "Already deleted", else: "Delete turn")}
+              disabled={@turn.deleted?}
+            >
+              <.icon name="hero-trash-mini" class="size-3" />
+            </button>
+          </div>
+        </div>
+      <% end %>
     </div>
     """
   end
@@ -894,6 +999,120 @@ defmodule NoterWeb.SessionLive.Show do
   def handle_event("prefill_replacement", %{"word" => word}, socket) do
     form = to_form(%{"find" => word, "replace" => ""}, as: :replacement)
     {:noreply, assign(socket, :replacement_form, form)}
+  end
+
+  def handle_event("start_edit", %{"turn-id" => id_str}, socket) do
+    turn_id = String.to_integer(id_str)
+    edits = socket.assigns.edits
+
+    text =
+      case Map.fetch(edits, id_str) do
+        {:ok, edited_text} ->
+          edited_text
+
+        :error ->
+          socket.assigns.raw_turns
+          |> Enum.find(&(&1.id == turn_id))
+          |> then(fn turn ->
+            replacements = socket.assigns.replacements
+
+            {[replaced_turn], _counts} = Transcript.apply_replacements([turn], replacements)
+
+            replaced_turn
+            |> Map.get(:display_words)
+            |> Enum.map_join(fn w -> w.word end)
+            |> String.trim()
+          end)
+      end
+
+    edit_form = to_form(%{"text" => text}, as: :edit)
+    turn = find_display_turn(socket, turn_id)
+    editing_turn = Map.merge(turn, %{editing?: true, edit_form: edit_form})
+
+    {:noreply,
+     socket
+     |> assign(:editing_turn_id, turn_id)
+     |> stream_insert(:turns, editing_turn)}
+  end
+
+  def handle_event("cancel_edit", _params, socket) do
+    turn_id = socket.assigns.editing_turn_id
+    turn = find_display_turn(socket, turn_id)
+    normal_turn = Map.merge(turn, %{editing?: false, edit_form: nil})
+
+    {:noreply,
+     socket
+     |> assign(:editing_turn_id, nil)
+     |> stream_insert(:turns, normal_turn)}
+  end
+
+  def handle_event("save_edit", %{"edit" => %{"text" => text}}, socket) do
+    session = socket.assigns.session
+    turn_id = socket.assigns.editing_turn_id
+
+    case Sessions.add_edit(session, turn_id, String.trim(text)) do
+      {:ok, session} ->
+        {:noreply, recompute_review(socket, session)}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to save edit.")}
+    end
+  end
+
+  def handle_event("delete_turn", %{"turn-id" => id_str}, socket) do
+    session = socket.assigns.session
+
+    case Sessions.add_edit(session, String.to_integer(id_str), "") do
+      {:ok, session} ->
+        {:noreply, recompute_review(socket, session)}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete turn.")}
+    end
+  end
+
+  def handle_event("remove_edit", %{"turn-id" => id_str}, socket) do
+    session = socket.assigns.session
+    turn_id = String.to_integer(id_str)
+
+    case Sessions.remove_edit(session, turn_id) do
+      {:ok, session} ->
+        {:noreply, recompute_review(socket, session)}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to remove edit.")}
+    end
+  end
+
+  def handle_event("finalize", _params, socket) do
+    session = socket.assigns.session
+
+    case Sessions.finalize(session) do
+      {:ok, session} ->
+        {:noreply,
+         socket
+         |> assign(:session, session)
+         |> assign_review_state(session)
+         |> put_flash(:info, "Transcript finalized.")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to finalize.")}
+    end
+  end
+
+  def handle_event("unfinalize", _params, socket) do
+    session = socket.assigns.session
+
+    case Sessions.unfinalize(session) do
+      {:ok, session} ->
+        {:noreply,
+         socket
+         |> assign(:session, session)
+         |> assign_review_state(session)}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to unfinalize.")}
+    end
   end
 
   def handle_event("delete_session", _params, socket) do
@@ -1126,20 +1345,30 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   defp assign_review_state(socket, session) do
-    if session.status in ~w(transcribed reviewing) do
+    if session.status in ~w(transcribed reviewing done) do
       raw_turns = Transcript.parse_turns(session.transcript_json)
       replacements = Map.get(session.corrections, "replacements", %{})
-      display_turns = Transcript.apply_replacements(raw_turns, replacements)
-      match_counts = Transcript.match_counts(raw_turns, replacements)
+      edits = Map.get(session.corrections, "edits", %{})
+
+      {replaced_turns, match_counts} = Transcript.apply_replacements(raw_turns, replacements)
+
+      display_turns =
+        replaced_turns
+        |> Transcript.apply_edits(edits)
+        |> stamp_editing_state()
+
       speakers = raw_turns |> Enum.map(& &1.speaker) |> Enum.uniq()
       speaker_colors = build_speaker_colors(speakers)
 
       socket
       |> assign(:reviewing?, true)
       |> assign(:raw_turns, raw_turns)
+      |> assign(:display_turns, display_turns)
       |> assign(:replacements, replacements)
+      |> assign(:edits, edits)
       |> assign(:match_counts, match_counts)
       |> assign(:speaker_colors, speaker_colors)
+      |> assign(:editing_turn_id, nil)
       |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
       |> assign(:trimmed_audio_url, ~p"/sessions/#{session.id}/audio/trimmed")
       |> stream(:turns, display_turns, reset: true)
@@ -1147,9 +1376,12 @@ defmodule NoterWeb.SessionLive.Show do
       socket
       |> assign(:reviewing?, false)
       |> assign(:raw_turns, [])
+      |> assign(:display_turns, [])
       |> assign(:replacements, %{})
+      |> assign(:edits, %{})
       |> assign(:match_counts, %{})
       |> assign(:speaker_colors, %{})
+      |> assign(:editing_turn_id, nil)
       |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
       |> assign(:trimmed_audio_url, nil)
     end
@@ -1158,15 +1390,59 @@ defmodule NoterWeb.SessionLive.Show do
   defp recompute_review(socket, session) do
     raw_turns = socket.assigns.raw_turns
     replacements = Map.get(session.corrections, "replacements", %{})
-    display_turns = Transcript.apply_replacements(raw_turns, replacements)
-    match_counts = Transcript.match_counts(raw_turns, replacements)
+    edits = Map.get(session.corrections, "edits", %{})
+
+    {replaced_turns, match_counts} = Transcript.apply_replacements(raw_turns, replacements)
+
+    new_turns =
+      replaced_turns
+      |> Transcript.apply_edits(edits)
+      |> stamp_editing_state()
+
+    prev_turns = socket.assigns.display_turns
+    changed = diff_turns(prev_turns, new_turns)
 
     socket
     |> assign(:session, session)
     |> assign(:replacements, replacements)
+    |> assign(:edits, edits)
     |> assign(:match_counts, match_counts)
+    |> assign(:display_turns, new_turns)
+    |> assign(:editing_turn_id, nil)
     |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
-    |> stream(:turns, display_turns, reset: true)
+    |> then(fn socket ->
+      Enum.reduce(changed, socket, fn turn, sock ->
+        stream_insert(sock, :turns, turn)
+      end)
+    end)
+  end
+
+  defp diff_turns(prev, next) do
+    prev_map =
+      Map.new(prev, fn t ->
+        {t.id, {t.display_words, Map.get(t, :edited?, false), Map.get(t, :deleted?, false)}}
+      end)
+
+    Enum.filter(next, fn turn ->
+      prev_val = Map.get(prev_map, turn.id)
+      curr_val = {turn.display_words, turn.edited?, turn.deleted?}
+      prev_val != curr_val
+    end)
+  end
+
+  defp stamp_editing_state(turns) do
+    Enum.map(turns, &Map.merge(&1, %{editing?: false, edit_form: nil}))
+  end
+
+  defp find_display_turn(socket, turn_id) do
+    raw_turn = Enum.find(socket.assigns.raw_turns, &(&1.id == turn_id))
+
+    {[replaced], _counts} = Transcript.apply_replacements([raw_turn], socket.assigns.replacements)
+
+    [replaced]
+    |> Transcript.apply_edits(socket.assigns.edits)
+    |> hd()
+    |> Map.merge(%{editing?: false, edit_form: nil})
   end
 
   defp build_speaker_colors(speakers) do

@@ -44,99 +44,148 @@ defmodule Noter.Transcription.Transcript do
   against concatenated stripped tokens. Annotates each word with `:replaced?`, `:original`.
   """
   def apply_replacements(turns, replacements) when map_size(replacements) == 0 do
-    Enum.map(turns, fn turn ->
-      words =
-        Enum.map(turn.words, fn w ->
-          %{word: w["word"], start: w["start"], end: w["end"], replaced?: false, original: nil}
-        end)
+    display_turns =
+      Enum.map(turns, fn turn ->
+        words =
+          Enum.map(turn.words, fn w ->
+            %{word: w["word"], start: w["start"], end: w["end"], replaced?: false, original: nil}
+          end)
 
-      Map.put(turn, :display_words, words)
-    end)
+        Map.put(turn, :display_words, words)
+      end)
+
+    {display_turns, %{}}
   end
 
   def apply_replacements(turns, replacements) do
     patterns = build_patterns(replacements)
+    {single_map, multi_patterns} = split_patterns(patterns)
 
-    Enum.map(turns, fn turn ->
-      display_words = apply_patterns_to_words(turn.words, patterns)
-      Map.put(turn, :display_words, display_words)
-    end)
-  end
+    {display_turns_rev, counts} =
+      Enum.reduce(turns, {[], %{}}, fn turn, {turns_acc, counts_acc} ->
+        {display_words, turn_counts} =
+          apply_and_count_words(turn.words, single_map, multi_patterns)
 
-  @doc """
-  Returns a map of find_word => count for each replacement key.
-  """
-  def match_counts(_turns, replacements) when map_size(replacements) == 0, do: %{}
+        merged_counts = Map.merge(counts_acc, turn_counts, fn _k, a, b -> a + b end)
+        {[Map.put(turn, :display_words, display_words) | turns_acc], merged_counts}
+      end)
 
-  def match_counts(turns, replacements) do
-    patterns = build_patterns(replacements)
-
-    Enum.reduce(turns, %{}, fn turn, acc ->
-      count_matches_in_words(turn.words, patterns, acc)
-    end)
+    {Enum.reverse(display_turns_rev), counts}
   end
 
   defp build_patterns(replacements) do
     replacements
     |> Enum.map(fn {find, replace} ->
-      # Tokenize the find string the same way we'll compare: split on whitespace
       find_tokens = String.split(find)
-      regex = ~r/\A#{Regex.escape(find)}\z/i
-      {find, replace, find_tokens, regex}
+      stripped_downcased = Enum.map(find_tokens, &(&1 |> strip_word() |> String.downcase()))
+      {find, replace, find_tokens, stripped_downcased}
     end)
     |> Enum.sort_by(fn {_, _, tokens, _} -> -length(tokens) end)
   end
 
-  # Walk the word list, trying multi-word patterns first (longest match wins).
-  # Returns annotated display_words list.
-  defp apply_patterns_to_words(words, patterns) do
-    apply_patterns_to_words(words, patterns, [])
+  # Split patterns into a fast single-word lookup map and multi-word patterns list.
+  defp split_patterns(patterns) do
+    {multi, single} = Enum.split_with(patterns, fn {_, _, tokens, _} -> length(tokens) > 1 end)
+
+    single_map =
+      Map.new(single, fn {find, replace, find_tokens, _} ->
+        key = find_tokens |> hd() |> strip_word() |> String.downcase()
+        {key, {find, replace, find_tokens}}
+      end)
+
+    {single_map, multi}
   end
 
-  defp apply_patterns_to_words([], _patterns, acc), do: Enum.reverse(acc)
+  # Single pass: applies replacements and counts matches simultaneously.
+  # Uses indexed arrays for O(1) access and a hash map for single-word pattern lookup.
+  defp apply_and_count_words(words, single_map, multi_patterns) do
+    word_array = :array.from_list(words)
+    len = :array.size(word_array)
 
-  defp apply_patterns_to_words(words, patterns, acc) do
-    case find_matching_pattern(words, patterns) do
+    keys =
+      :array.from_list(
+        Enum.map(words, fn w -> w["word"] |> strip_word() |> String.downcase() end)
+      )
+
+    {display_words, counts} =
+      apply_and_count(word_array, keys, len, 0, single_map, multi_patterns, [], %{})
+
+    {display_words, counts}
+  end
+
+  defp apply_and_count(_wa, _keys, len, pos, _sm, _multi, acc, counts) when pos >= len do
+    {Enum.reverse(acc), counts}
+  end
+
+  defp apply_and_count(wa, keys, len, pos, sm, multi, acc, counts) do
+    key = :array.get(pos, keys)
+
+    case find_multi_match(keys, len, pos, multi) do
       {pattern, match_len} ->
-        {matched, rest} = Enum.split(words, match_len)
-        {_find, replace, tokens, _regex} = pattern
-        annotated = annotate_matched_words(matched, replace, tokens)
-        apply_patterns_to_words(rest, patterns, Enum.reverse(annotated) ++ acc)
+        {find, replace, find_tokens, _} = pattern
+        matched = for i <- pos..(pos + match_len - 1), do: :array.get(i, wa)
+        annotated = annotate_matched_words(matched, replace, find_tokens)
+        new_counts = Map.update(counts, find, 1, &(&1 + 1))
+
+        apply_and_count(
+          wa,
+          keys,
+          len,
+          pos + match_len,
+          sm,
+          multi,
+          Enum.reverse(annotated) ++ acc,
+          new_counts
+        )
 
       nil ->
-        [w | rest] = words
+        case Map.fetch(sm, key) do
+          {:ok, {find, replace, find_tokens}} ->
+            w = :array.get(pos, wa)
+            annotated = annotate_matched_words([w], replace, find_tokens)
+            new_counts = Map.update(counts, find, 1, &(&1 + 1))
 
-        plain = %{
-          word: w["word"],
-          start: w["start"],
-          end: w["end"],
-          replaced?: false,
-          original: nil
-        }
+            apply_and_count(
+              wa,
+              keys,
+              len,
+              pos + 1,
+              sm,
+              multi,
+              Enum.reverse(annotated) ++ acc,
+              new_counts
+            )
 
-        apply_patterns_to_words(rest, patterns, [plain | acc])
+          :error ->
+            w = :array.get(pos, wa)
+
+            plain = %{
+              word: w["word"],
+              start: w["start"],
+              end: w["end"],
+              replaced?: false,
+              original: nil
+            }
+
+            apply_and_count(wa, keys, len, pos + 1, sm, multi, [plain | acc], counts)
+        end
     end
   end
 
-  defp find_matching_pattern(words, patterns) do
-    Enum.find_value(patterns, fn {_find, _replace, find_tokens, _regex} = pattern ->
-      token_count = length(find_tokens)
+  defp find_multi_match(_keys, _len, _pos, []), do: nil
 
-      if token_count <= length(words) do
-        candidate_words = Enum.take(words, token_count)
-        candidate_stripped = Enum.map(candidate_words, fn w -> strip_word(w["word"]) end)
+  defp find_multi_match(keys, len, pos, multi_patterns) do
+    Enum.find_value(multi_patterns, fn {_find, _replace, _tokens, stripped_downcased} = pattern ->
+      token_count = length(stripped_downcased)
 
-        if tokens_match?(candidate_stripped, find_tokens) do
-          {pattern, token_count}
-        end
+      if pos + token_count <= len do
+        match? =
+          stripped_downcased
+          |> Enum.with_index()
+          |> Enum.all?(fn {find_key, i} -> :array.get(pos + i, keys) == find_key end)
+
+        if match?, do: {pattern, token_count}
       end
-    end)
-  end
-
-  defp tokens_match?(word_tokens, find_tokens) do
-    Enum.zip(word_tokens, find_tokens)
-    |> Enum.all?(fn {word, find} ->
-      String.downcase(word) == String.downcase(strip_word(find))
     end)
   end
 
@@ -170,22 +219,6 @@ defmodule Noter.Transcription.Transcript do
     [first_annotated | rest_annotated]
   end
 
-  # Count matches using the same multi-word sliding window approach
-  defp count_matches_in_words([], _patterns, acc), do: acc
-
-  defp count_matches_in_words(words, patterns, acc) do
-    case find_matching_pattern(words, patterns) do
-      {pattern, match_len} ->
-        {_find, _replace, _tokens, _regex} = pattern
-        find = elem(pattern, 0)
-        rest = Enum.drop(words, match_len)
-        count_matches_in_words(rest, patterns, Map.update(acc, find, 1, &(&1 + 1)))
-
-      nil ->
-        count_matches_in_words(tl(words), patterns, acc)
-    end
-  end
-
   # Returns only the portion of word_suffix that goes beyond find_suffix.
   # e.g. word_suffix=".", find_suffix="." => ""
   #      word_suffix=",", find_suffix="" => ","
@@ -196,6 +229,108 @@ defmodule Noter.Transcription.Transcript do
     else
       word_suffix
     end
+  end
+
+  @doc """
+  Applies per-turn edits to display-turns. If a turn's stringified id is in the edits map,
+  its display_words are replaced with a single synthetic word containing the edited text.
+  """
+  def apply_edits(turns, edits) when map_size(edits) == 0 do
+    Enum.map(turns, &Map.merge(&1, %{edited?: false, deleted?: false}))
+  end
+
+  def apply_edits(turns, edits) do
+    Enum.map(turns, fn turn ->
+      key = to_string(turn.id)
+
+      case Map.fetch(edits, key) do
+        {:ok, ""} ->
+          Map.merge(turn, %{edited?: false, deleted?: true})
+
+        {:ok, edited_text} ->
+          turn
+          |> Map.merge(%{edited?: true, deleted?: false})
+          |> Map.put(:display_words, [
+            %{
+              word: edited_text,
+              replaced?: false,
+              original: nil,
+              start: turn.start,
+              end: turn.end
+            }
+          ])
+
+        :error ->
+          Map.merge(turn, %{edited?: false, deleted?: false})
+      end
+    end)
+  end
+
+  @doc """
+  Applies the full corrections (replacements + edits) to raw turns and returns
+  a flat list of corrected turn maps for finalization.
+  """
+  def apply_corrections(raw_turns, corrections) do
+    replacements = Map.get(corrections, "replacements", %{})
+    edits = Map.get(corrections, "edits", %{})
+
+    {single_map, multi_patterns} =
+      if map_size(replacements) > 0 do
+        replacements |> build_patterns() |> split_patterns()
+      else
+        {%{}, []}
+      end
+
+    raw_turns
+    |> Enum.reject(fn turn -> Map.get(edits, to_string(turn.id)) == "" end)
+    |> Enum.map(fn turn ->
+      key = to_string(turn.id)
+
+      text =
+        case Map.fetch(edits, key) do
+          {:ok, edited_text} ->
+            edited_text
+
+          :error ->
+            if single_map == %{} and multi_patterns == [] do
+              Enum.map_join(turn.words, fn w -> w["word"] end)
+            else
+              {display_words, _counts} =
+                apply_and_count_words(turn.words, single_map, multi_patterns)
+
+              Enum.map_join(display_words, fn w -> w.word end)
+            end
+        end
+
+      %{speaker: turn.speaker, start: turn.start, end: turn.end, text: String.trim(text)}
+    end)
+  end
+
+  @doc """
+  Converts corrected turns into SRT format string.
+  """
+  def segments_to_srt(turns) do
+    turns
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n\n", fn {turn, idx} ->
+      "#{idx}\n#{srt_timestamp(turn.start)} --> #{srt_timestamp(turn.end)}\n[#{turn.speaker}] #{turn.text}"
+    end)
+    |> Kernel.<>("\n")
+  end
+
+  defp srt_timestamp(seconds) when is_number(seconds) do
+    total_ms = round(seconds * 1000)
+    ms = rem(total_ms, 1000)
+    total_s = div(total_ms, 1000)
+    s = rem(total_s, 60)
+    total_m = div(total_s, 60)
+    m = rem(total_m, 60)
+    h = div(total_m, 60)
+
+    [h, m, s]
+    |> Enum.map(&String.pad_leading(Integer.to_string(&1), 2, "0"))
+    |> Enum.join(":")
+    |> Kernel.<>(",#{String.pad_leading(Integer.to_string(ms), 3, "0")}")
   end
 
   defp strip_word(word) do

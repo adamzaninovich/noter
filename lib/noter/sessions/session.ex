@@ -44,7 +44,7 @@ defmodule Noter.Sessions.Session do
 
   def corrections_changeset(session, attrs) do
     session
-    |> cast(attrs, [:corrections, :status])
+    |> cast(attrs, [:corrections, :status, :transcript_srt])
     |> validate_required([:status])
     |> validate_inclusion(:status, @valid_statuses)
   end

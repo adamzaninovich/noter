@@ -55,10 +55,14 @@ defmodule Noter.Sessions do
 
   def update_corrections(%Session{} = session, corrections_map) do
     status =
-      if session.status == "transcribed", do: "reviewing", else: session.status
+      if session.status in ~w(transcribed done), do: "reviewing", else: session.status
 
     session
-    |> Session.corrections_changeset(%{corrections: corrections_map, status: status})
+    |> Session.corrections_changeset(%{
+      corrections: corrections_map,
+      status: status,
+      transcript_srt: nil
+    })
     |> Repo.update()
   end
 
@@ -69,6 +73,42 @@ defmodule Noter.Sessions do
       |> Map.put(find, replace)
 
     update_corrections(session, Map.put(session.corrections, "replacements", replacements))
+  end
+
+  def add_edit(%Session{} = session, turn_id, text) do
+    edits =
+      session.corrections
+      |> Map.get("edits", %{})
+      |> Map.put(to_string(turn_id), text)
+
+    update_corrections(session, Map.put(session.corrections, "edits", edits))
+  end
+
+  def remove_edit(%Session{} = session, turn_id) do
+    edits =
+      session.corrections
+      |> Map.get("edits", %{})
+      |> Map.delete(to_string(turn_id))
+
+    update_corrections(session, Map.put(session.corrections, "edits", edits))
+  end
+
+  def finalize(%Session{} = session) do
+    alias Noter.Transcription.Transcript
+
+    raw_turns = Transcript.parse_turns(session.transcript_json)
+    corrected_turns = Transcript.apply_corrections(raw_turns, session.corrections)
+    srt = Transcript.segments_to_srt(corrected_turns)
+
+    session
+    |> Session.corrections_changeset(%{status: "done", transcript_srt: srt})
+    |> Repo.update()
+  end
+
+  def unfinalize(%Session{} = session) do
+    session
+    |> Session.corrections_changeset(%{status: "reviewing", transcript_srt: nil})
+    |> Repo.update()
   end
 
   def remove_replacement(%Session{} = session, find) do

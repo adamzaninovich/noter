@@ -85,7 +85,7 @@ Remove SRT storage from transcription ingest; SRT is fully derivable from JSON s
 - Verify `transcript_json` contains all necessary data: `segments: [{start, end, text, speaker, words}]`
 - Remove any UI that references raw SRT data in the transcription step
 
-## Phase 5b — Transcript Viewer, Audio Playback & Replacements
+## Phase 5b — Transcript Viewer, Audio Playback & Replacements ✅
 
 Scrollable transcript viewer with audio playback and global find-and-replace corrections for TTRPG names/terms.
 
