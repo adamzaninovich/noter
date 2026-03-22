@@ -71,7 +71,7 @@ defmodule NoterWeb.SessionLive.Show do
         </div>
 
         <%!-- Step indicator --%>
-        <ul class="steps w-full">
+        <ul class="steps w-full text-xs sm:text-sm">
           <%= for {status_key, label} <- @steps do %>
             <li class={["step", step_complete?(@session.status, status_key) && "step-primary"]}>
               {label}
@@ -289,44 +289,46 @@ defmodule NoterWeb.SessionLive.Show do
         <%= if @session.status == "done" do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
-              <div class="flex items-center justify-between">
-                <h2 class="card-title text-lg">
+              <div class="flex items-center justify-between gap-2">
+                <h2 class="card-title text-lg whitespace-nowrap">
                   <.icon name="hero-check-circle-solid" class="size-6 text-success" />
                   Session Complete
                 </h2>
-                <div class="flex items-center gap-2">
-                  <button
-                    id="unfinalize-btn"
-                    phx-click="unfinalize"
-                    class="btn btn-outline btn-sm"
-                    phx-disable-with="Unfinalizing..."
-                  >
-                    Back to Review
-                  </button>
-                </div>
+                <button
+                  id="unfinalize-btn"
+                  phx-click="unfinalize"
+                  class="btn btn-outline btn-sm shrink-0"
+                  phx-disable-with="Unfinalizing..."
+                >
+                  Back to Review
+                </button>
               </div>
 
-              <div class="flex items-center justify-between mt-3">
-                <div class="flex flex-wrap gap-6">
-                  <div class="flex flex-col items-center">
-                    <span class="text-2xl font-bold">{@done_stats.duration}</span>
-                    <span class="text-xs text-base-content/60">Duration</span>
+              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-3 gap-4">
+                <div class="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
+                  <div class="flex justify-center gap-6">
+                    <div class="flex flex-col items-center">
+                      <span class="text-2xl font-bold">{@done_stats.duration}</span>
+                      <span class="text-xs text-base-content/60">Duration</span>
+                    </div>
+                    <div class="flex flex-col items-center">
+                      <span class="text-2xl font-bold">{@done_stats.speaker_count}</span>
+                      <span class="text-xs text-base-content/60">Speakers</span>
+                    </div>
+                    <div class="flex flex-col items-center">
+                      <span class="text-2xl font-bold">{@done_stats.turn_count}</span>
+                      <span class="text-xs text-base-content/60">Turns</span>
+                    </div>
                   </div>
-                  <div class="flex flex-col items-center">
-                    <span class="text-2xl font-bold">{@done_stats.speaker_count}</span>
-                    <span class="text-xs text-base-content/60">Speakers</span>
-                  </div>
-                  <div class="flex flex-col items-center">
-                    <span class="text-2xl font-bold">{@done_stats.turn_count}</span>
-                    <span class="text-xs text-base-content/60">Turns</span>
-                  </div>
-                  <div class="flex flex-col items-center">
-                    <span class="text-2xl font-bold">{@done_stats.replacement_count}</span>
-                    <span class="text-xs text-base-content/60">Replacements</span>
-                  </div>
-                  <div class="flex flex-col items-center">
-                    <span class="text-2xl font-bold">{@done_stats.edit_count}</span>
-                    <span class="text-xs text-base-content/60">Edits</span>
+                  <div class="flex justify-center gap-6">
+                    <div class="flex flex-col items-center">
+                      <span class="text-2xl font-bold">{@done_stats.replacement_count}</span>
+                      <span class="text-xs text-base-content/60">Replacements</span>
+                    </div>
+                    <div class="flex flex-col items-center">
+                      <span class="text-2xl font-bold">{@done_stats.edit_count}</span>
+                      <span class="text-xs text-base-content/60">Edits</span>
+                    </div>
                   </div>
                 </div>
                 <a
@@ -373,7 +375,7 @@ defmodule NoterWeb.SessionLive.Show do
                   Click any word to prefill the find field. Add replacements to fix transcription errors.
                 <% end %>
               </p>
-              <div class="flex gap-6">
+              <div class="flex flex-col lg:flex-row gap-6">
                 <%!-- Left: transcript viewer --%>
                 <div class="flex-1 min-w-0 space-y-3">
                   <div
@@ -401,7 +403,7 @@ defmodule NoterWeb.SessionLive.Show do
                 </div>
 
                 <%!-- Right: replacements panel --%>
-                <div class="w-80 shrink-0 flex flex-col max-h-[70vh]">
+                <div class="w-full lg:w-80 shrink-0 flex flex-col lg:max-h-[70vh]">
                   <%= if @session.status != "done" do %>
                     <.form
                       for={@replacement_form}
@@ -410,7 +412,7 @@ defmodule NoterWeb.SessionLive.Show do
                       phx-change="validate_replacement"
                       class="shrink-0 mb-4"
                     >
-                      <div class="flex items-center gap-2 [&_.fieldset]:mb-0">
+                      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 [&_.fieldset]:mb-0">
                         <.input
                           field={@replacement_form[:find]}
                           placeholder="Find..."
@@ -786,7 +788,7 @@ defmodule NoterWeb.SessionLive.Show do
   defp turn_row(assigns) do
     ~H"""
     <div class={[
-      "flex items-start gap-2 py-2 px-2 rounded-lg transition-colors",
+      "flex flex-wrap sm:flex-nowrap items-start gap-x-2 gap-y-1 py-2 px-2 rounded-lg transition-colors",
       @turn.edited? && "border-l-2 border-info",
       !@turn.editing? && "hover:bg-base-100"
     ]}>
@@ -809,8 +811,55 @@ defmodule NoterWeb.SessionLive.Show do
       ]}>
         {@turn.speaker}
       </span>
+      <%!-- Action buttons: on mobile sit in the metadata row, on desktop next to text --%>
+      <%= unless @read_only? do %>
+        <div class="flex items-center gap-0.5 shrink-0 mt-0.5 sm:order-last">
+          <%= if @turn.edited? or @turn.deleted? do %>
+            <span class={[
+              "badge badge-xs",
+              if(@turn.deleted?, do: "badge-error", else: "badge-info")
+            ]}>
+              {if(@turn.deleted?, do: "deleted", else: "edited")}
+            </span>
+            <button
+              type="button"
+              phx-click="remove_edit"
+              phx-value-turn-id={@turn.id}
+              class="btn btn-ghost btn-xs text-warning"
+              title="Revert"
+            >
+              <.icon name="hero-arrow-uturn-left-mini" class="size-3" />
+            </button>
+          <% end %>
+          <%= if not @turn.deleted? do %>
+            <button
+              type="button"
+              phx-click="start_edit"
+              phx-value-turn-id={@turn.id}
+              class="btn btn-ghost btn-xs sm:opacity-0 sm:group-hover:opacity-100"
+              title="Edit turn"
+            >
+              <.icon name="hero-pencil-square-mini" class="size-3" />
+            </button>
+          <% end %>
+          <button
+            type="button"
+            phx-click="delete_turn"
+            phx-value-turn-id={@turn.id}
+            class={[
+              "btn btn-ghost btn-xs text-error",
+              !@turn.deleted? && "sm:opacity-0 sm:group-hover:opacity-100"
+            ]}
+            title={if(@turn.deleted?, do: "Already deleted", else: "Delete turn")}
+            disabled={@turn.deleted?}
+          >
+            <.icon name="hero-trash-mini" class="size-3" />
+          </button>
+        </div>
+      <% end %>
+      <%!-- Content: edit form or text --%>
       <%= if @turn.editing? do %>
-        <div class="flex-1">
+        <div class="basis-full sm:basis-auto sm:flex-1">
           <.form
             for={@turn.edit_form}
             id={"edit-form-#{@turn.id}"}
@@ -832,8 +881,8 @@ defmodule NoterWeb.SessionLive.Show do
           </.form>
         </div>
       <% else %>
-        <div class="flex-1 flex items-start gap-1">
-          <p class="text-sm leading-relaxed flex-1">
+        <div class="basis-full sm:basis-auto sm:flex-1 min-w-0">
+          <p class="text-sm leading-relaxed">
             <%= cond do %>
               <% @turn.deleted? -> %>
                 <span class="italic text-base-content/40">deleted</span>
@@ -853,51 +902,6 @@ defmodule NoterWeb.SessionLive.Show do
                 <% end %>
             <% end %>
           </p>
-          <%= unless @read_only? do %>
-            <div class="flex items-center gap-0.5 shrink-0 mt-0.5">
-              <%= if @turn.edited? or @turn.deleted? do %>
-                <span class={[
-                  "badge badge-xs",
-                  if(@turn.deleted?, do: "badge-error", else: "badge-info")
-                ]}>
-                  {if(@turn.deleted?, do: "deleted", else: "edited")}
-                </span>
-                <button
-                  type="button"
-                  phx-click="remove_edit"
-                  phx-value-turn-id={@turn.id}
-                  class="btn btn-ghost btn-xs text-warning"
-                  title="Revert"
-                >
-                  <.icon name="hero-arrow-uturn-left-mini" class="size-3" />
-                </button>
-              <% end %>
-              <%= if not @turn.deleted? do %>
-                <button
-                  type="button"
-                  phx-click="start_edit"
-                  phx-value-turn-id={@turn.id}
-                  class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100"
-                  title="Edit turn"
-                >
-                  <.icon name="hero-pencil-square-mini" class="size-3" />
-                </button>
-              <% end %>
-              <button
-                type="button"
-                phx-click="delete_turn"
-                phx-value-turn-id={@turn.id}
-                class={[
-                  "btn btn-ghost btn-xs text-error",
-                  !@turn.deleted? && "opacity-0 group-hover:opacity-100"
-                ]}
-                title={if(@turn.deleted?, do: "Already deleted", else: "Delete turn")}
-                disabled={@turn.deleted?}
-              >
-                <.icon name="hero-trash-mini" class="size-3" />
-              </button>
-            </div>
-          <% end %>
         </div>
       <% end %>
     </div>
