@@ -38,7 +38,7 @@ ARG AUDIOWAVEFORM_DEB="audiowaveform_${AUDIOWAVEFORM_VERSION}-1-12_amd64.deb"
 
 RUN apt-get update -y && \
     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \
-      ffmpeg curl && \
+      ffmpeg unzip curl && \
     curl -fsSL -o /tmp/audiowaveform.deb \
       "https://github.com/bbc/audiowaveform/releases/download/${AUDIOWAVEFORM_VERSION}/${AUDIOWAVEFORM_DEB}" && \
     (dpkg -i /tmp/audiowaveform.deb || apt-get install -f -y) && \
