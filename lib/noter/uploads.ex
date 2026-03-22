@@ -108,22 +108,28 @@ defmodule Noter.Uploads do
     wav_path = Path.join(base_dir, "merged.wav")
     trimmed_wav = Path.join(trimmed_dir, "merged.wav")
     trimmed_m4a = Path.join(trimmed_dir, "merged.m4a")
-    total = length(flac_files) + 2
+    duration = end_seconds - start_seconds
 
-    with :ok <-
-           precise_clip_all_with_progress(
-             flac_files,
-             trimmed_dir,
-             session.campaign.player_map,
-             start_seconds,
-             end_seconds,
-             total,
-             on_progress
-           ),
-         _ = on_progress.("merged.wav", {length(flac_files), total}),
-         :ok <- precise_clip(wav_path, trimmed_wav, start_seconds, end_seconds),
-         _ = on_progress.("merged.m4a", {length(flac_files) + 1, total}),
-         :ok <- convert_wav_to_m4a(trimmed_wav, trimmed_m4a) do
+    jobs =
+      Enum.map(flac_files, fn path ->
+        basename = Path.basename(path, ".flac")
+        character_name = Prep.resolve_character(basename, session.campaign.player_map)
+        output_path = Path.join(trimmed_dir, "#{character_name}.flac")
+        {"#{character_name}.flac", path, output_path}
+      end)
+
+    all_clip_jobs = jobs ++ [{"merged.wav", wav_path, trimmed_wav}]
+
+    with :ok <- parallel_clip(all_clip_jobs, start_seconds, duration, on_progress),
+         :ok <-
+           ffmpeg_with_progress(
+             trimmed_wav,
+             trimmed_m4a,
+             [],
+             ["-c:a", "aac", "-b:a", "192k"],
+             duration,
+             fn pct -> on_progress.("merged.m4a", pct) end
+           ) do
       File.rm(trimmed_wav)
       :ok
     else
@@ -139,57 +145,106 @@ defmodule Noter.Uploads do
     |> File.rm()
   end
 
-  defp convert_wav_to_m4a(input, output) do
-    args = ["-y", "-i", input, "-c:a", "aac", "-b:a", "192k", output]
+  defp parallel_clip(jobs, start_seconds, duration, on_progress) do
+    results =
+      jobs
+      |> Task.async_stream(
+        fn {label, input, output} ->
+          ffmpeg_with_progress(
+            input,
+            output,
+            ["-ss", to_string(start_seconds)],
+            ["-t", to_string(duration)],
+            duration,
+            fn pct -> on_progress.(label, pct) end
+          )
+        end,
+        timeout: :infinity,
+        ordered: false
+      )
+      |> Enum.to_list()
 
-    case System.cmd("ffmpeg", args, stderr_to_stdout: true) do
-      {_, 0} -> :ok
-      {out, code} -> {:error, "ffmpeg wav→m4a failed (exit #{code}): #{out}"}
+    case Enum.find(results, fn {:ok, result} -> result != :ok end) do
+      nil -> :ok
+      {:ok, err} -> err
     end
   end
 
-  defp precise_clip(input, output, start_seconds, end_seconds) do
-    duration = end_seconds - start_seconds
-
-    args = [
-      "-y",
-      "-ss",
-      to_string(start_seconds),
-      "-i",
-      input,
-      "-t",
-      to_string(duration),
-      output
-    ]
-
-    case System.cmd("ffmpeg", args, stderr_to_stdout: true) do
-      {_, 0} -> :ok
-      {out, code} -> {:error, "ffmpeg failed (exit #{code}) for #{Path.basename(input)}: #{out}"}
-    end
-  end
-
-  defp precise_clip_all_with_progress(
-         flac_files,
-         output_dir,
-         player_map,
-         start_seconds,
-         end_seconds,
-         total,
-         on_progress
+  defp ffmpeg_with_progress(
+         input,
+         output,
+         pre_input_args,
+         post_input_args,
+         duration_seconds,
+         on_percent
        ) do
-    flac_files
-    |> Enum.with_index()
-    |> Enum.reduce_while(:ok, fn {path, index}, :ok ->
-      basename = Path.basename(path, ".flac")
-      character_name = Prep.resolve_character(basename, player_map)
-      output_path = Path.join(output_dir, "#{character_name}.flac")
-      on_progress.("#{character_name}.flac", {index, total})
+    total_us = trunc(duration_seconds * 1_000_000)
+    ffmpeg = System.find_executable("ffmpeg") || "ffmpeg"
 
-      case precise_clip(path, output_path, start_seconds, end_seconds) do
-        :ok -> {:cont, :ok}
-        err -> {:halt, err}
-      end
-    end)
+    args =
+      ["-y", "-nostats", "-loglevel", "error"] ++
+        pre_input_args ++
+        ["-i", input] ++
+        post_input_args ++
+        ["-progress", "pipe:1", output]
+
+    port =
+      Port.open({:spawn_executable, ffmpeg}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        args: args
+      ])
+
+    on_percent.(0)
+    collect_ffmpeg_progress(port, "", total_us, -1, on_percent)
+  end
+
+  defp collect_ffmpeg_progress(port, buffer, total_us, last_pct, on_percent) do
+    receive do
+      {^port, {:data, data}} ->
+        buffer = buffer <> data
+        {lines, leftover} = split_lines(buffer)
+
+        last_pct =
+          Enum.reduce(lines, last_pct, fn line, acc ->
+            case parse_progress_percent(line, total_us) do
+              nil ->
+                acc
+
+              pct when pct != acc ->
+                on_percent.(pct)
+                pct
+
+              _ ->
+                acc
+            end
+          end)
+
+        collect_ffmpeg_progress(port, leftover, total_us, last_pct, on_percent)
+
+      {^port, {:exit_status, 0}} ->
+        on_percent.(100)
+        :ok
+
+      {^port, {:exit_status, code}} ->
+        {:error, "ffmpeg failed (exit #{code}) for #{inspect(port)}"}
+    end
+  end
+
+  defp parse_progress_percent("out_time_us=" <> val, total_us) when total_us > 0 do
+    case Integer.parse(String.trim(val)) do
+      {us, _} -> min(100, trunc(us / total_us * 100))
+      :error -> nil
+    end
+  end
+
+  defp parse_progress_percent(_, _), do: nil
+
+  defp split_lines(data) do
+    parts = String.split(data, "\n")
+    {complete, [leftover]} = Enum.split(parts, -1)
+    {complete, leftover}
   end
 
   def list_renamed_files(session_id) do

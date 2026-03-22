@@ -189,21 +189,22 @@ defmodule NoterWeb.SessionLive.Show do
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <h2 class="card-title text-lg">Trimming Audio</h2>
-              <div class="space-y-3 mt-2">
-                <div class="flex items-center justify-between text-sm">
-                  <span class="text-base-content/70">
-                    {trim_step_label(@trim_current_file)}
-                  </span>
-                  <span class="font-mono text-base-content/70">
-                    {@trim_completed + 1}/{@trim_total}
+              <div class="space-y-2 mt-3">
+                <div :for={{file, pct} <- @trim_files} class="flex items-center gap-3">
+                  <span class="text-sm w-28 truncate shrink-0">{trim_file_label(file)}</span>
+                  <progress class="progress progress-primary flex-1 h-2" value={pct} max="100">
+                  </progress>
+                  <span class="w-8 shrink-0 flex justify-end">
+                    <.icon
+                      :if={pct == 100}
+                      name="hero-check-circle-solid"
+                      class="w-5 h-5 text-success"
+                    />
+                    <span :if={pct < 100} class="text-xs text-base-content/50">
+                      {pct}%
+                    </span>
                   </span>
                 </div>
-                <progress
-                  class="progress progress-primary w-full"
-                  value={@trim_completed}
-                  max={@trim_total}
-                >
-                </progress>
               </div>
             </div>
           </div>
@@ -939,13 +940,9 @@ defmodule NoterWeb.SessionLive.Show do
     current_idx >= step_idx
   end
 
-  defp trim_step_label("merged.wav"), do: "Trimming merged audio"
-  defp trim_step_label("merged.m4a"), do: "Converting to M4A for playback"
-
-  defp trim_step_label(file) do
-    name = Path.basename(file, Path.extname(file))
-    "Trimming speaker: #{name}"
-  end
+  defp trim_file_label("merged.wav"), do: "Merged"
+  defp trim_file_label("merged.m4a"), do: "M4A"
+  defp trim_file_label(file), do: Path.basename(file, Path.extname(file))
 
   defp transcription_wait_message(:uploading), do: "Uploading files to transcription service..."
   defp transcription_wait_message(:queued), do: "Waiting in queue..."
@@ -982,20 +979,25 @@ defmodule NoterWeb.SessionLive.Show do
         session = Sessions.get_session_with_campaign!(session.id)
 
         Task.start(fn ->
-          on_progress = fn file, {completed, total} ->
-            send(lv, {:trim_progress, file, completed, total})
+          on_progress = fn file, percent ->
+            send(lv, {:trim_progress, file, percent})
           end
 
           result = Uploads.trim_session(session, start, end_val, on_progress)
           send(lv, {:trim_complete, result, start, end_val})
         end)
 
+        renamed = socket.assigns.renamed_files
+
+        trim_files =
+          Enum.sort(renamed)
+          |> Enum.map(&{&1, 0})
+          |> Kernel.++([{"merged.wav", 0}, {"merged.m4a", 0}])
+
         {:noreply,
          socket
          |> assign(:trimming?, true)
-         |> assign(:trim_current_file, "...")
-         |> assign(:trim_completed, 0)
-         |> assign(:trim_total, 0)}
+         |> assign(:trim_files, trim_files)}
     end
   end
 
@@ -1213,12 +1215,14 @@ defmodule NoterWeb.SessionLive.Show do
      |> put_flash(:error, "Waveform generation failed: #{reason}")}
   end
 
-  def handle_info({:trim_progress, file, completed, total}, socket) do
-    {:noreply,
-     socket
-     |> assign(:trim_current_file, file)
-     |> assign(:trim_completed, completed)
-     |> assign(:trim_total, total)}
+  def handle_info({:trim_progress, file, percent}, socket) do
+    trim_files =
+      Enum.map(socket.assigns.trim_files, fn
+        {^file, _} -> {file, percent}
+        other -> other
+      end)
+
+    {:noreply, assign(socket, :trim_files, trim_files)}
   end
 
   def handle_info({:trim_complete, :ok, start, end_val}, socket) do
