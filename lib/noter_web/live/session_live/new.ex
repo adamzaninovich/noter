@@ -98,7 +98,7 @@ defmodule NoterWeb.SessionLive.New do
                   <%!-- Zip Upload --%>
                   <div>
                     <label class="label font-medium">
-                      Discord Recording (ZIP) <span class="text-error text-xs ml-1">Required</span>
+                      Discord Recording (ZIP)
                     </label>
                     <div class="flex flex-col gap-2" phx-drop-target={@uploads.zip_file.ref}>
                       <.live_file_input
@@ -116,7 +116,7 @@ defmodule NoterWeb.SessionLive.New do
                   <%!-- AAC Upload --%>
                   <div>
                     <label class="label font-medium">
-                      Merged Audio (AAC) <span class="text-error text-xs ml-1">Required</span>
+                      Merged Audio (AAC)
                     </label>
                     <div class="flex flex-col gap-2" phx-drop-target={@uploads.aac_file.ref}>
                       <.live_file_input

@@ -8,17 +8,8 @@ defmodule NoterWeb.SessionLive.UploadHelpers do
     ~H"""
     <div :for={entry <- @entries} class="flex items-center gap-3">
       <div class="flex-1">
-        <div class="flex items-center justify-between text-sm mb-1">
+        <div class="text-sm mb-1">
           <span class="truncate max-w-xs">{entry.client_name}</span>
-          <button
-            type="button"
-            phx-click="cancel-upload"
-            phx-value-ref={entry.ref}
-            phx-value-upload-ref={@upload_ref}
-            class="btn btn-ghost btn-xs"
-          >
-            <.icon name="hero-x-mark" class="size-4" />
-          </button>
         </div>
         <progress class="progress progress-primary w-full" value={entry.progress} max="100">
           {entry.progress}%
