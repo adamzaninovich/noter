@@ -22,8 +22,8 @@ defmodule Noter.Uploads do
     aac_dest = Path.join(base_dir, "merged.aac")
     vocab_dest = Path.join(base_dir, "vocab.txt")
 
-    if aac_path, do: File.rename!(aac_path, aac_dest)
-    if vocab_path, do: File.rename!(vocab_path, vocab_dest)
+    if aac_path, do: move_file!(aac_path, aac_dest)
+    if vocab_path, do: move_file!(vocab_path, vocab_dest)
 
     # Extract zip, rename FLACs, clean up intermediates
     with :ok <- Prep.extract_zip(zip_path, extracted_dir),
@@ -188,5 +188,10 @@ defmodule Noter.Uploads do
     else
       []
     end
+  end
+
+  defp move_file!(source, dest) do
+    File.cp!(source, dest)
+    File.rm!(source)
   end
 end
