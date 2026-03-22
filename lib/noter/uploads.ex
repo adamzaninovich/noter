@@ -10,7 +10,14 @@ defmodule Noter.Uploads do
       Path.join(Application.app_dir(:noter, "priv"), "uploads")
   end
 
-  def process_uploads(session, campaign, zip_path, aac_path, vocab_path) do
+  def process_uploads(
+        session,
+        campaign,
+        zip_path,
+        aac_path,
+        vocab_path,
+        on_progress \\ fn _ -> :ok end
+      ) do
     base_dir = session_dir(session.id)
     extracted_dir = Path.join(base_dir, "extracted")
     renamed_dir = Path.join(base_dir, "renamed")
@@ -18,16 +25,24 @@ defmodule Noter.Uploads do
     File.mkdir_p!(base_dir)
     File.mkdir_p!(extracted_dir)
 
-    # Move consumed files into session dir
+    on_progress.("Copying audio file...")
     aac_dest = Path.join(base_dir, "merged.aac")
     vocab_dest = Path.join(base_dir, "vocab.txt")
 
     if aac_path, do: move_file!(aac_path, aac_dest)
-    if vocab_path, do: move_file!(vocab_path, vocab_dest)
 
-    # Extract zip, rename FLACs, clean up intermediates
-    with :ok <- Prep.extract_zip(zip_path, extracted_dir),
-         {:ok, renamed} <- Prep.rename_flacs(extracted_dir, renamed_dir, campaign.player_map) do
+    if vocab_path do
+      on_progress.("Copying vocabulary file...")
+      move_file!(vocab_path, vocab_dest)
+    end
+
+    on_progress.("Extracting ZIP archive...")
+
+    with :ok <- Prep.extract_zip(zip_path, extracted_dir) do
+      on_progress.("Renaming tracks...")
+      {:ok, renamed} = Prep.rename_flacs(extracted_dir, renamed_dir, campaign.player_map)
+
+      on_progress.("Cleaning up temporary files...")
       File.rm(zip_path)
       File.rm_rf(extracted_dir)
       {:ok, renamed}

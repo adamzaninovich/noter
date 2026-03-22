@@ -26,6 +26,7 @@ defmodule NoterWeb.SessionLive.New do
      |> assign(:form, to_form(changeset))
      |> assign(:steps, @steps)
      |> assign(:processing?, false)
+     |> assign(:processing_status, nil)
      |> allow_upload(:zip_file,
        accept: ~w(.zip),
        max_entries: 1,
@@ -72,7 +73,9 @@ defmodule NoterWeb.SessionLive.New do
             <%= if @processing? do %>
               <div class="flex flex-col items-center py-8 gap-4">
                 <span class="loading loading-spinner loading-lg text-primary"></span>
-                <p class="text-base-content/70">Processing uploaded files...</p>
+                <p class="text-base-content/70">
+                  {@processing_status || "Processing uploaded files..."}
+                </p>
               </div>
             <% else %>
               <.form
@@ -206,32 +209,39 @@ defmodule NoterWeb.SessionLive.New do
           vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
 
           lv = self()
+          on_progress = fn status -> send(lv, {:processing_status, status}) end
 
-          Task.start(fn ->
-            result =
-              with {:ok, session} <- Sessions.create_session(campaign, session_params),
-                   {:ok, _renamed} <-
-                     Uploads.process_uploads(
-                       session,
-                       campaign,
-                       List.first(zip_paths),
-                       List.first(aac_paths),
-                       List.first(vocab_paths)
-                     ),
-                   {:ok, _session} <- Sessions.update_session(session, %{status: "uploaded"}) do
-                {:ok, session}
-              else
-                {:error, %Ecto.Changeset{} = changeset} ->
-                  {:error, changeset}
+          {:ok, pid} =
+            Task.start(fn ->
+              on_progress.("Creating session...")
 
-                {:error, reason} ->
-                  {:error, reason}
-              end
+              result =
+                with {:ok, session} <- Sessions.create_session(campaign, session_params),
+                     {:ok, _renamed} <-
+                       Uploads.process_uploads(
+                         session,
+                         campaign,
+                         List.first(zip_paths),
+                         List.first(aac_paths),
+                         List.first(vocab_paths),
+                         on_progress
+                       ),
+                     {:ok, _session} <- Sessions.update_session(session, %{status: "uploaded"}) do
+                  {:ok, session}
+                else
+                  {:error, %Ecto.Changeset{} = changeset} ->
+                    {:error, changeset}
 
-            send(lv, {:upload_processed, result})
-          end)
+                  {:error, reason} ->
+                    {:error, reason}
+                end
 
-          {:noreply, assign(socket, :processing?, true)}
+              send(lv, {:upload_processed, result})
+            end)
+
+          Process.monitor(pid)
+
+          {:noreply, assign(socket, processing?: true, processing_status: "Creating session...")}
         else
           {:noreply, assign(socket, form: to_form(%{changeset | action: :validate}))}
         end
@@ -239,6 +249,10 @@ defmodule NoterWeb.SessionLive.New do
   end
 
   @impl true
+  def handle_info({:processing_status, status}, socket) do
+    {:noreply, assign(socket, :processing_status, status)}
+  end
+
   def handle_info({:upload_processed, {:ok, session}}, socket) do
     campaign = socket.assigns.campaign
 
@@ -260,5 +274,16 @@ defmodule NoterWeb.SessionLive.New do
      socket
      |> assign(:processing?, false)
      |> put_flash(:error, "File processing failed: #{reason}")}
+  end
+
+  def handle_info({:DOWN, _ref, :process, _pid, :normal}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info({:DOWN, _ref, :process, _pid, reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:processing?, false)
+     |> put_flash(:error, "File processing crashed: #{inspect(reason)}")}
   end
 end
