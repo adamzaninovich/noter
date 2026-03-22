@@ -191,7 +191,7 @@ defmodule NoterWeb.SessionLive.Show do
               <h2 class="card-title text-lg">Trimming Audio</h2>
               <div class="space-y-2 mt-3">
                 <div :for={{file, pct} <- @trim_files} class="flex items-center gap-3">
-                  <span class="text-sm w-28 truncate shrink-0">{trim_file_label(file)}</span>
+                  <span class="text-sm w-44 truncate shrink-0">{trim_file_label(file)}</span>
                   <progress class="progress progress-primary flex-1 h-2" value={pct} max="100">
                   </progress>
                   <span class="w-8 shrink-0 flex justify-end">
@@ -940,9 +940,9 @@ defmodule NoterWeb.SessionLive.Show do
     current_idx >= step_idx
   end
 
-  defp trim_file_label("merged.wav"), do: "Merged"
-  defp trim_file_label("merged.m4a"), do: "M4A"
-  defp trim_file_label(file), do: Path.basename(file, Path.extname(file))
+  defp trim_file_label("merged.wav"), do: "Trimming Merged"
+  defp trim_file_label("merged.m4a"), do: "Converting to M4A"
+  defp trim_file_label(file), do: "Trimming #{Path.basename(file, Path.extname(file))}"
 
   defp transcription_wait_message(:uploading), do: "Uploading files to transcription service..."
   defp transcription_wait_message(:queued), do: "Waiting in queue..."
