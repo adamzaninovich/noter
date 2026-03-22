@@ -28,6 +28,7 @@ cat > "$INSTALL_DIR/compose.yaml" << EOF
 services:
   noter:
     image: noter:latest
+    pull_policy: never
     restart: unless-stopped
     ports:
       - "4000:4000"
