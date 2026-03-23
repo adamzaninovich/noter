@@ -22,6 +22,12 @@ defmodule Noter.UploadsTest do
       dir = Uploads.session_dir(session.id)
       assert String.ends_with?(dir, "priv/uploads/#{session.id}")
     end
+
+    test "raises on path traversal attempt" do
+      assert_raise ArgumentError, ~r/outside uploads directory/, fn ->
+        Uploads.session_dir("../../../etc")
+      end
+    end
   end
 
   describe "process_uploads/5" do

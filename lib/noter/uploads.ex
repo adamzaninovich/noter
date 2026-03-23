@@ -2,7 +2,14 @@ defmodule Noter.Uploads do
   alias Noter.Prep
 
   def session_dir(session_id) do
-    Path.join([uploads_dir(), to_string(session_id)])
+    base = uploads_dir()
+    full = Path.join(base, to_string(session_id)) |> Path.expand()
+
+    if String.starts_with?(full, Path.expand(base) <> "/") do
+      full
+    else
+      raise ArgumentError, "session_id results in path outside uploads directory"
+    end
   end
 
   def uploads_dir do
