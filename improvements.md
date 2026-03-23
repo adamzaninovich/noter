@@ -2,11 +2,17 @@
 
 Tracked issues from a full code review. Ordered by priority within each category.
 
+Instructions:
+Whenever this file is invoked by the user, find the next uncompleted issue and analyze it.
+Always discuss possible solutions before diving in.
+Once a solution is agreen upon with the user, enter plan mode and plan it out.
+Once an issue is fixed. Edit this file and mark it complete.
+
 ---
 
 ## Security
 
-### S1: Path traversal in AudioController
+### ~~S1: Path traversal in AudioController~~ ✅
 
 **File:** `lib/noter_web/controllers/audio_controller.ex:6-7, 16-17, 26-27`
 
@@ -14,10 +20,7 @@ The `session_id` param is passed directly to `Uploads.session_dir/1` without val
 
 The `DownloadController` is safe because it calls `Sessions.get_session_with_campaign!/1` first (Ecto coerces to integer), but `AudioController` skips the DB entirely.
 
-**Fix options:**
-- Validate `session_id` is a positive integer before constructing the path
-- Look up the session from the DB first (like `DownloadController` does), which also gives a proper 404 for nonexistent sessions
-- Add a path validation helper in `Uploads` that ensures the resolved path stays within the uploads directory
+**Fixed:** Added controller plug to validate `session_id` is a positive integer (returns 404 otherwise), and added path containment check in `Uploads.session_dir/1` that raises if the resolved path escapes the uploads directory.
 
 ### S2: No server-side guard on mutation events during "done" status
 
