@@ -149,7 +149,7 @@ defmodule Noter.Transcription.Transcript do
     key = :array.get(pos, keys)
 
     case find_multi_match(keys, len, pos, multi) do
-      {pattern, match_len} ->
+      {pattern, match_len, _possessive?} ->
         {find, replace, find_tokens, _} = pattern
         matched = for i <- pos..(pos + match_len - 1), do: :array.get(i, wa)
         annotated = annotate_matched_words(matched, replace, find_tokens)
@@ -167,8 +167,8 @@ defmodule Noter.Transcription.Transcript do
         )
 
       nil ->
-        case Map.fetch(sm, key) do
-          {:ok, {find, replace, find_tokens}} ->
+        case match_single(sm, key) do
+          {:ok, {find, replace, find_tokens}, _possessive?} ->
             w = :array.get(pos, wa)
             annotated = annotate_matched_words([w], replace, find_tokens)
             new_counts = Map.update(counts, find, 1, &(&1 + 1))
@@ -200,6 +200,26 @@ defmodule Noter.Transcription.Transcript do
     end
   end
 
+  # Looks up a single-word key in the map, falling back to possessive-stripped base.
+  defp match_single(sm, key) do
+    case Map.fetch(sm, key) do
+      {:ok, match} ->
+        {:ok, match, false}
+
+      :error ->
+        case strip_possessive(key) do
+          {base, _} ->
+            case Map.fetch(sm, base) do
+              {:ok, match} -> {:ok, match, true}
+              :error -> :error
+            end
+
+          :none ->
+            :error
+        end
+    end
+  end
+
   defp find_multi_match(_keys, _len, _pos, []), do: nil
 
   defp find_multi_match(keys, len, pos, multi_patterns) do
@@ -207,12 +227,36 @@ defmodule Noter.Transcription.Transcript do
       token_count = length(stripped_downcased)
 
       if pos + token_count <= len do
-        match? =
+        # Try exact match first
+        exact? =
           stripped_downcased
           |> Enum.with_index()
           |> Enum.all?(fn {find_key, i} -> :array.get(pos + i, keys) == find_key end)
 
-        if match?, do: {pattern, token_count}
+        if exact? do
+          {pattern, token_count, false}
+        else
+          # Try possessive match: all tokens match except last has 's appended
+          last_idx = token_count - 1
+
+          possessive? =
+            stripped_downcased
+            |> Enum.with_index()
+            |> Enum.all?(fn {find_key, i} ->
+              actual = :array.get(pos + i, keys)
+
+              if i == last_idx do
+                case strip_possessive(actual) do
+                  {base, _} -> base == find_key
+                  :none -> false
+                end
+              else
+                actual == find_key
+              end
+            end)
+
+          if possessive?, do: {pattern, token_count, true}
+        end
       end
     end)
   end
@@ -276,8 +320,10 @@ defmodule Noter.Transcription.Transcript do
           Map.merge(turn, %{edited?: false, deleted?: true})
 
         {:ok, edited_text} ->
+          original_text = Enum.map_join(turn.words, fn w -> w["word"] end)
+
           turn
-          |> Map.merge(%{edited?: true, deleted?: false})
+          |> Map.merge(%{edited?: true, deleted?: false, original_text: original_text})
           |> Map.put(:display_words, [
             %{
               word: edited_text,
@@ -367,6 +413,20 @@ defmodule Noter.Transcription.Transcript do
     |> String.replace(~r/[.,;:!?\-"')\]]+\z/, "")
   end
 
+  # Returns {base, possessive_suffix} if the key ends with 's or 's, otherwise :none.
+  defp strip_possessive(key) do
+    cond do
+      String.ends_with?(key, "'s") ->
+        {String.slice(key, 0, String.length(key) - 2), "'s"}
+
+      String.ends_with?(key, "\u2019s") ->
+        {String.slice(key, 0, String.length(key) - 2), "\u2019s"}
+
+      true ->
+        :none
+    end
+  end
+
   defp extract_affixes(word) do
     prefix =
       case Regex.run(~r/\A(\s+)/, word) do
@@ -375,7 +435,7 @@ defmodule Noter.Transcription.Transcript do
       end
 
     suffix =
-      case Regex.run(~r/([.,;:!?\-"')\]]+)\z/, word) do
+      case Regex.run(~r/(['\x{2019}]s[.,;:!?\-"')\]]*|[.,;:!?\-"')\]]+)\z/u, word) do
         [_, punct] -> punct
         _ -> ""
       end

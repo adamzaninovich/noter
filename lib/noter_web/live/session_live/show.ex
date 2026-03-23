@@ -396,7 +396,11 @@ defmodule NoterWeb.SessionLive.Show do
                     phx-update="stream"
                     class="space-y-2 max-h-[70vh] overflow-y-auto pr-1"
                   >
-                    <div :for={{id, turn} <- @streams.turns} id={id} class="group">
+                    <div
+                      :for={{id, turn} <- @streams.turns}
+                      id={id}
+                      class={["group", @done_stats != nil && turn.deleted? && "hidden"]}
+                    >
                       {turn_row(%{
                         turn: turn,
                         speaker_colors: @speaker_colors,
@@ -407,7 +411,11 @@ defmodule NoterWeb.SessionLive.Show do
                 </div>
 
                 <%!-- Right: replacements panel --%>
-                <div class="w-full lg:w-80 shrink-0 flex flex-col lg:max-h-[70vh]">
+                <div
+                  class="w-full lg:w-80 shrink-0 flex flex-col lg:max-h-[70vh]"
+                  id="replacements-panel"
+                  phx-hook=".DownloadJson"
+                >
                   <%= if @session.status != "done" do %>
                     <.form
                       for={@replacement_form}
@@ -435,11 +443,34 @@ defmodule NoterWeb.SessionLive.Show do
                   <% end %>
 
                   <%= if @replacements != %{} do %>
-                    <div class="text-xs font-semibold text-base-content/60 uppercase tracking-wide shrink-0 mb-1">
-                      {if(@session.status == "done", do: "Replacements", else: "Active Replacements")}
+                    <div class="flex items-center justify-between shrink-0 mb-1">
+                      <div class="text-xs font-semibold text-base-content/60 uppercase tracking-wide">
+                        {if(@session.status == "done",
+                          do: "Replacements",
+                          else: "Active Replacements"
+                        )}
+                      </div>
+                      <div :if={@session.status != "done"} class="flex gap-1">
+                        <button
+                          type="button"
+                          phx-click="export_replacements"
+                          class="btn btn-ghost btn-xs"
+                          title="Export as JSON"
+                        >
+                          <.icon name="hero-arrow-down-tray-micro" class="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="toggle_import"
+                          class="btn btn-ghost btn-xs"
+                          title="Import from JSON"
+                        >
+                          <.icon name="hero-arrow-up-tray-micro" class="size-4" />
+                        </button>
+                      </div>
                     </div>
                     <div class="overflow-y-auto space-y-1 pr-1">
-                      <%= for {find, replace} <- @replacements do %>
+                      <%= for {find, replace} <- Enum.sort_by(@replacements, fn {f, _} -> Map.get(@match_counts, f, 0) end, :desc) do %>
                         <div class="flex items-center gap-2 bg-base-100 rounded-lg px-3 py-2 text-sm">
                           <span class="font-mono text-error/70">{find}</span>
                           <.icon
@@ -463,7 +494,51 @@ defmodule NoterWeb.SessionLive.Show do
                         </div>
                       <% end %>
                     </div>
+                  <% else %>
+                    <div :if={@session.status != "done"} class="flex justify-end shrink-0 mb-1">
+                      <button
+                        type="button"
+                        phx-click="toggle_import"
+                        class="btn btn-ghost btn-xs"
+                        title="Import from JSON"
+                      >
+                        <.icon name="hero-arrow-up-tray-micro" class="size-4" /> Import
+                      </button>
+                    </div>
                   <% end %>
+
+                  <%= if @import_open? do %>
+                    <.form for={%{}} id="import-form" phx-submit="import_replacements" class="mt-2">
+                      <textarea
+                        name="json"
+                        rows="6"
+                        placeholder={"{\n  \"find\": \"replace\",\n  ...\n}"}
+                        class="textarea textarea-bordered w-full font-mono text-sm"
+                        id="import-json-textarea"
+                        phx-hook="DropJson"
+                      ></textarea>
+                      <div class="flex gap-2 mt-2">
+                        <button type="submit" class="btn btn-primary btn-sm">Import</button>
+                        <button type="button" phx-click="toggle_import" class="btn btn-ghost btn-sm">
+                          Cancel
+                        </button>
+                      </div>
+                    </.form>
+                  <% end %>
+
+                  <script :type={Phoenix.LiveView.ColocatedHook} name=".DownloadJson">
+                    export default {
+                      mounted() {
+                        this.handleEvent("download-json", ({content, filename}) => {
+                          const blob = new Blob([content], {type: "application/json"})
+                          const url = URL.createObjectURL(blob)
+                          const a = document.createElement("a")
+                          a.href = url; a.download = filename; a.click()
+                          URL.revokeObjectURL(url)
+                        })
+                      }
+                    }
+                  </script>
                 </div>
               </div>
             </div>
@@ -804,9 +879,12 @@ defmodule NoterWeb.SessionLive.Show do
   defp turn_row(assigns) do
     ~H"""
     <div class={[
-      "flex flex-wrap sm:flex-nowrap items-start gap-x-2 gap-y-1 py-2 px-2 rounded-lg transition-colors",
-      @turn.edited? && "border-l-2 border-info",
-      !@turn.editing? && "hover:bg-base-100"
+      "flex flex-wrap sm:flex-nowrap items-start gap-x-2 gap-y-1 py-2 px-2 rounded-lg transition-colors border",
+      cond do
+        @turn.deleted? -> "border-error/30"
+        @turn.edited? -> "border-info/30"
+        true -> "border-base-content/5"
+      end
     ]}>
       <button
         :if={not @read_only?}
@@ -829,7 +907,7 @@ defmodule NoterWeb.SessionLive.Show do
       </span>
       <%!-- Action buttons: on mobile sit in the metadata row, on desktop next to text --%>
       <%= unless @read_only? do %>
-        <div class="flex items-center gap-0.5 shrink-0 mt-0.5 sm:order-last">
+        <div class="flex items-center gap-0.5 shrink-0 mt-0.5 sm:order-last sm:opacity-0 sm:group-hover:opacity-100">
           <%= if @turn.edited? or @turn.deleted? do %>
             <span class={[
               "badge badge-xs",
@@ -839,6 +917,15 @@ defmodule NoterWeb.SessionLive.Show do
             </span>
             <button
               type="button"
+              phx-click="start_edit"
+              phx-value-turn-id={@turn.id}
+              class="btn btn-ghost btn-xs"
+              title="Edit turn"
+            >
+              <.icon name="hero-pencil-square-mini" class="size-3" />
+            </button>
+            <button
+              type="button"
               phx-click="remove_edit"
               phx-value-turn-id={@turn.id}
               class="btn btn-ghost btn-xs text-warning"
@@ -846,31 +933,26 @@ defmodule NoterWeb.SessionLive.Show do
             >
               <.icon name="hero-arrow-uturn-left-mini" class="size-3" />
             </button>
-          <% end %>
-          <%= if not @turn.deleted? do %>
+          <% else %>
             <button
               type="button"
               phx-click="start_edit"
               phx-value-turn-id={@turn.id}
-              class="btn btn-ghost btn-xs sm:opacity-0 sm:group-hover:opacity-100"
+              class="btn btn-ghost btn-xs"
               title="Edit turn"
             >
               <.icon name="hero-pencil-square-mini" class="size-3" />
             </button>
+            <button
+              type="button"
+              phx-click="delete_turn"
+              phx-value-turn-id={@turn.id}
+              class="btn btn-ghost btn-xs text-error"
+              title="Delete turn"
+            >
+              <.icon name="hero-trash-mini" class="size-3" />
+            </button>
           <% end %>
-          <button
-            type="button"
-            phx-click="delete_turn"
-            phx-value-turn-id={@turn.id}
-            class={[
-              "btn btn-ghost btn-xs text-error",
-              !@turn.deleted? && "sm:opacity-0 sm:group-hover:opacity-100"
-            ]}
-            title={if(@turn.deleted?, do: "Already deleted", else: "Delete turn")}
-            disabled={@turn.deleted?}
-          >
-            <.icon name="hero-trash-mini" class="size-3" />
-          </button>
         </div>
       <% end %>
       <%!-- Content: edit form or text --%>
@@ -887,6 +969,8 @@ defmodule NoterWeb.SessionLive.Show do
               type="textarea"
               class="textarea textarea-bordered textarea-sm w-full"
               rows="3"
+              id={"edit-textarea-#{@turn.id}"}
+              phx-hook=".CmdEnterSubmit"
             />
             <div class="flex items-center gap-2">
               <button type="submit" class="btn btn-primary btn-xs">Save</button>
@@ -895,15 +979,40 @@ defmodule NoterWeb.SessionLive.Show do
               </button>
             </div>
           </.form>
+          <script :type={Phoenix.LiveView.ColocatedHook} name=".CmdEnterSubmit">
+            export default {
+              mounted() {
+                this.el.addEventListener("keydown", (e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault()
+                    this.el.closest("form").requestSubmit()
+                  }
+                })
+              }
+            }
+          </script>
         </div>
       <% else %>
         <div class="basis-full sm:basis-auto sm:flex-1 min-w-0">
           <p class="text-sm leading-relaxed">
             <%= cond do %>
               <% @turn.deleted? -> %>
-                <span class="italic text-base-content/40">deleted</span>
+                <span class="italic text-base-content/40">
+                  <%= for word <- @turn.display_words do %>
+                    {word.word}
+                  <% end %>
+                </span>
               <% @turn.edited? -> %>
-                <span class="text-info">{hd(@turn.display_words).word}</span>
+                <%= for {type, text} <- word_diff(@turn.original_text, hd(@turn.display_words).word) do %>
+                  <%= case type do %>
+                    <% :eq -> %>
+                      <span>{text}</span>
+                    <% :del -> %>
+                      <span class="bg-error/20 text-error/70 line-through">{text}</span>
+                    <% :ins -> %>
+                      <span class="bg-success/20 text-success font-medium">{text}</span>
+                  <% end %>
+                <% end %>
               <% true -> %>
                 <%= for word <- @turn.display_words do %>
                   {leading_space(word.word)}<span
@@ -948,6 +1057,20 @@ defmodule NoterWeb.SessionLive.Show do
     word
     |> String.trim_leading()
     |> String.replace(~r/[.,;:!?\-"')\]]+\z/, "")
+  end
+
+  defp word_diff(original, edited) do
+    old_words = String.split(original)
+    new_words = String.split(edited)
+    List.myers_difference(old_words, new_words) |> format_diff_chunks()
+  end
+
+  defp format_diff_chunks(chunks) do
+    Enum.flat_map(chunks, fn
+      {:eq, words} -> [{:eq, Enum.join(words, " ")}]
+      {:del, words} -> [{:del, Enum.join(words, " ")}]
+      {:ins, words} -> [{:ins, Enum.join(words, " ")}]
+    end)
   end
 
   @speaker_palette ~w(badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error)
@@ -1029,7 +1152,7 @@ defmodule NoterWeb.SessionLive.Show do
         %{"replacement" => %{"find" => find, "replace" => replace}},
         socket
       ) do
-    find = String.trim(find)
+    find = find |> String.trim() |> String.downcase()
     replace = String.trim(replace)
 
     cond do
@@ -1061,6 +1184,41 @@ defmodule NoterWeb.SessionLive.Show do
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to remove replacement.")}
+    end
+  end
+
+  def handle_event("export_replacements", _params, socket) do
+    json = Jason.encode!(socket.assigns.replacements, pretty: true)
+
+    {:noreply,
+     push_event(socket, "download-json", %{content: json, filename: "replacements.json"})}
+  end
+
+  def handle_event("toggle_import", _params, socket) do
+    {:noreply, assign(socket, import_open?: !socket.assigns.import_open?)}
+  end
+
+  def handle_event("import_replacements", %{"json" => json}, socket) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) ->
+        if Enum.all?(map, fn {k, v} -> is_binary(k) and is_binary(v) end) do
+          case Sessions.add_replacements(socket.assigns.session, map) do
+            {:ok, session} ->
+              {:noreply,
+               socket
+               |> assign(import_open?: false)
+               |> recompute_review(session)
+               |> put_flash(:info, "Imported #{map_size(map)} replacement(s).")}
+
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Failed to import.")}
+          end
+        else
+          {:noreply, put_flash(socket, :error, "All keys and values must be strings.")}
+        end
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Invalid JSON object.")}
     end
   end
 
@@ -1447,6 +1605,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
       |> assign(:trimmed_audio_url, ~p"/sessions/#{session.id}/audio/trimmed")
       |> assign(:done_stats, done_stats)
+      |> assign(:import_open?, false)
       |> stream(:turns, display_turns, reset: true)
     else
       socket
@@ -1461,6 +1620,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
       |> assign(:trimmed_audio_url, nil)
       |> assign(:done_stats, nil)
+      |> assign(:import_open?, false)
     end
   end
 

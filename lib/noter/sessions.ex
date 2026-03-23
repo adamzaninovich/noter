@@ -45,11 +45,34 @@ defmodule Noter.Sessions do
   end
 
   def update_transcription(%Session{} = session, attrs) do
-    session
-    |> Session.transcription_changeset(attrs)
-    |> Repo.update()
-    |> broadcast_session_update()
+    with {:ok, session} <-
+           session
+           |> Session.transcription_changeset(attrs)
+           |> Repo.update()
+           |> broadcast_session_update(),
+         {:ok, session} <- apply_campaign_replacements(session, attrs) do
+      {:ok, session}
+    end
   end
+
+  defp apply_campaign_replacements(session, %{status: "transcribed"}) do
+    session = Repo.preload(session, :campaign)
+    campaign_replacements = session.campaign.common_replacements || %{}
+
+    if campaign_replacements == %{} do
+      {:ok, session}
+    else
+      existing = Map.get(session.corrections || %{}, "replacements", %{})
+      merged = Map.merge(campaign_replacements, existing)
+      corrections = Map.put(session.corrections || %{}, "replacements", merged)
+
+      session
+      |> Session.corrections_changeset(%{corrections: corrections})
+      |> Repo.update()
+    end
+  end
+
+  defp apply_campaign_replacements(session, _attrs), do: {:ok, session}
 
   def get_session_with_campaign!(id) do
     Session
@@ -89,7 +112,7 @@ defmodule Noter.Sessions do
     replacements =
       session.corrections
       |> Map.get("replacements", %{})
-      |> Map.put(find, replace)
+      |> Map.put(String.downcase(find), replace)
 
     update_corrections(session, Map.put(session.corrections, "replacements", replacements))
   end
@@ -130,6 +153,13 @@ defmodule Noter.Sessions do
     |> Session.corrections_changeset(%{status: "reviewing", transcript_srt: nil})
     |> Repo.update()
     |> broadcast_session_update()
+  end
+
+  def add_replacements(%Session{} = session, new_replacements) when is_map(new_replacements) do
+    existing = Map.get(session.corrections, "replacements", %{})
+    downcased = Map.new(new_replacements, fn {k, v} -> {String.downcase(k), v} end)
+    merged = Map.merge(existing, downcased)
+    update_corrections(session, Map.put(session.corrections, "replacements", merged))
   end
 
   def remove_replacement(%Session{} = session, find) do

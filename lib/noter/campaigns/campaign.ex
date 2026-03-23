@@ -6,6 +6,7 @@ defmodule Noter.Campaigns.Campaign do
     field :name, :string
     field :slug, :string
     field :player_map, :map, default: %{}
+    field :common_replacements, :map, default: %{}
 
     has_many :sessions, Noter.Sessions.Session
 
@@ -16,7 +17,7 @@ defmodule Noter.Campaigns.Campaign do
 
   def changeset(campaign, attrs) do
     campaign
-    |> cast(attrs, [:name, :player_map])
+    |> cast(attrs, [:name, :player_map, :common_replacements])
     |> validate_required([:name])
     |> generate_slug()
     |> validate_required([:slug], message: "name must contain at least one letter or number")

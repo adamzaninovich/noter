@@ -16,6 +16,12 @@ defmodule NoterWeb.CampaignLive.Show do
         %{id: System.unique_integer([:positive]), discord: discord, character: character}
       end)
 
+    replacement_rows =
+      campaign.common_replacements
+      |> Enum.map(fn {find, replace} ->
+        %{id: System.unique_integer([:positive]), find: find, replace: replace}
+      end)
+
     {:ok,
      socket
      |> assign(:page_title, campaign.name)
@@ -23,6 +29,9 @@ defmodule NoterWeb.CampaignLive.Show do
      |> assign(:name_form, to_form(name_changeset))
      |> assign(:player_rows, player_rows)
      |> assign(:editing_player_map, false)
+     |> assign(:replacement_rows, replacement_rows)
+     |> assign(:editing_replacements, false)
+     |> assign(:importing_replacements?, false)
      |> assign(:sessions_empty?, campaign.sessions == [])
      |> assign(:settings_open?, campaign.sessions == [] and campaign.player_map == %{})
      |> stream(:sessions, campaign.sessions)}
@@ -237,6 +246,191 @@ defmodule NoterWeb.CampaignLive.Show do
               </div>
             </div>
 
+            <%!-- Common Replacements --%>
+            <div class="card bg-base-100 border border-base-content/5 mt-2">
+              <div class="card-body p-4">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="card-title text-sm">Common Replacements</h3>
+                    <p class="text-sm text-base-content/60">
+                      Find/replace pairs applied to every session when review starts.
+                    </p>
+                  </div>
+                  <div :if={!@editing_replacements} class="flex gap-1">
+                    <button
+                      type="button"
+                      phx-click="toggle_import_replacements"
+                      class="btn btn-sm btn-ghost"
+                      title="Import from JSON"
+                    >
+                      <.icon name="hero-arrow-up-tray" class="size-4" /> Import
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="edit_replacements"
+                      class="btn btn-sm btn-ghost"
+                    >
+                      <.icon name="hero-pencil-square" class="size-4" /> Edit
+                    </button>
+                  </div>
+                </div>
+
+                <%= if @editing_replacements do %>
+                  <.form
+                    for={%{}}
+                    id="replacements-form"
+                    phx-change="update_replacement_rows"
+                    phx-submit="save_replacements"
+                  >
+                    <div class="overflow-x-auto rounded-box border border-base-content/5 bg-base-200 mt-2">
+                      <table class="table" id="replacements-table">
+                        <thead>
+                          <tr>
+                            <th>Find</th>
+                            <th>Replace</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <%= if @replacement_rows == [] do %>
+                            <tr>
+                              <td colspan="3" class="text-center text-base-content/50 py-6">
+                                No replacements added yet.
+                              </td>
+                            </tr>
+                          <% end %>
+                          <tr :for={row <- @replacement_rows} id={"replacement-row-#{row.id}"}>
+                            <td>
+                              <input
+                                type="text"
+                                value={row.find}
+                                name={"replacement[#{row.id}][find]"}
+                                placeholder="Find text"
+                                class="input input-bordered input-sm w-full"
+                                id={"replacement-find-#{row.id}"}
+                                phx-hook=".ReplacementInput"
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                value={row.replace}
+                                name={"replacement[#{row.id}][replace]"}
+                                placeholder="Replace with"
+                                class="input input-bordered input-sm w-full"
+                                id={"replacement-replace-#{row.id}"}
+                                phx-hook=".ReplacementInput"
+                              />
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                phx-click="remove_replacement_row"
+                                phx-value-id={row.id}
+                                class="btn btn-ghost btn-sm btn-square text-error"
+                              >
+                                <.icon name="hero-x-mark" class="size-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div class="flex gap-2 mt-2">
+                      <button
+                        type="button"
+                        phx-click="add_replacement_row"
+                        class="btn btn-sm btn-outline"
+                      >
+                        <.icon name="hero-plus" class="size-4" /> Add Row
+                      </button>
+                      <.button type="submit" class="btn btn-sm btn-primary">Save</.button>
+                      <button
+                        type="button"
+                        phx-click="cancel_edit_replacements"
+                        class="btn btn-sm btn-ghost"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </.form>
+                  <script :type={Phoenix.LiveView.ColocatedHook} name=".ReplacementInput">
+                    export default {
+                      mounted() {
+                        this.el.addEventListener("keydown", (e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault()
+                            this.pushEvent("add_replacement_row", {}, (reply) => {
+                              requestAnimationFrame(() => {
+                                const table = this.el.closest("table")
+                                const lastRow = table.querySelector("tbody tr:last-child")
+                                if (lastRow) {
+                                  const firstInput = lastRow.querySelector("input")
+                                  if (firstInput) firstInput.focus()
+                                }
+                              })
+                            })
+                          }
+                        })
+                      }
+                    }
+                  </script>
+                <% else %>
+                  <%= if @campaign.common_replacements == %{} do %>
+                    <div class="text-center py-4 text-base-content/50">
+                      No common replacements yet.
+                    </div>
+                  <% else %>
+                    <div class="overflow-x-auto rounded-box border border-base-content/5 bg-base-200 mt-2">
+                      <table class="table">
+                        <thead>
+                          <tr>
+                            <th>Find</th>
+                            <th>Replace</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr :for={{find, replace} <- @campaign.common_replacements}>
+                            <td class="font-mono">{find}</td>
+                            <td class="font-mono">{replace}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  <% end %>
+
+                  <%= if @importing_replacements? do %>
+                    <.form
+                      for={%{}}
+                      id="import-replacements-form"
+                      phx-submit="import_campaign_replacements"
+                      class="mt-3"
+                    >
+                      <textarea
+                        name="json"
+                        rows="6"
+                        placeholder={"{\n  \"find\": \"replace\",\n  ...\n}"}
+                        class="textarea textarea-bordered w-full font-mono text-sm"
+                        id="import-replacements-textarea"
+                        phx-hook="DropJson"
+                      ></textarea>
+                      <div class="flex gap-2 mt-2">
+                        <button type="submit" class="btn btn-primary btn-sm">Import</button>
+                        <button
+                          type="button"
+                          phx-click="toggle_import_replacements"
+                          class="btn btn-ghost btn-sm"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </.form>
+                  <% end %>
+                <% end %>
+              </div>
+            </div>
+
             <%!-- Danger Zone --%>
             <div class="card bg-base-100 border border-error/20 mt-2">
               <div class="card-body p-4">
@@ -420,6 +614,179 @@ defmodule NoterWeb.CampaignLive.Show do
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to save player map.")}
+    end
+  end
+
+  def handle_event("toggle_import_replacements", _params, socket) do
+    {:noreply,
+     assign(socket,
+       importing_replacements?: !socket.assigns.importing_replacements?,
+       settings_open?: true
+     )}
+  end
+
+  def handle_event("import_campaign_replacements", %{"json" => json}, socket) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) ->
+        if Enum.all?(map, fn {k, v} -> is_binary(k) and is_binary(v) end) do
+          existing = socket.assigns.campaign.common_replacements || %{}
+          downcased = Map.new(map, fn {k, v} -> {String.downcase(k), v} end)
+          merged = Map.merge(existing, downcased)
+
+          case Campaigns.update_campaign(socket.assigns.campaign, %{common_replacements: merged}) do
+            {:ok, campaign} ->
+              campaign = Campaigns.get_campaign!(campaign.id)
+
+              replacement_rows =
+                campaign.common_replacements
+                |> Enum.map(fn {find, replace} ->
+                  %{id: System.unique_integer([:positive]), find: find, replace: replace}
+                end)
+
+              {:noreply,
+               socket
+               |> put_flash(:info, "Imported #{map_size(map)} replacement(s).")
+               |> assign(:campaign, campaign)
+               |> assign(:replacement_rows, replacement_rows)
+               |> assign(:importing_replacements?, false)
+               |> assign(:settings_open?, true)}
+
+            {:error, _} ->
+              {:noreply,
+               socket
+               |> put_flash(:error, "Failed to import.")
+               |> assign(:settings_open?, true)}
+          end
+        else
+          {:noreply,
+           socket
+           |> put_flash(:error, "All keys and values must be strings.")
+           |> assign(:settings_open?, true)}
+        end
+
+      _ ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Invalid JSON object.")
+         |> assign(:settings_open?, true)}
+    end
+  end
+
+  def handle_event("edit_replacements", _params, socket) do
+    {:noreply, assign(socket, editing_replacements: true, settings_open?: true)}
+  end
+
+  def handle_event("cancel_edit_replacements", _params, socket) do
+    replacement_rows =
+      socket.assigns.campaign.common_replacements
+      |> Enum.map(fn {find, replace} ->
+        %{id: System.unique_integer([:positive]), find: find, replace: replace}
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:editing_replacements, false)
+     |> assign(:settings_open?, true)
+     |> assign(:replacement_rows, replacement_rows)}
+  end
+
+  def handle_event("update_replacement_rows", %{"replacement" => params}, socket) do
+    rows =
+      Enum.map(socket.assigns.replacement_rows, fn row ->
+        case Map.get(params, to_string(row.id)) do
+          %{"find" => find, "replace" => replace} ->
+            %{row | find: find, replace: replace}
+
+          _ ->
+            row
+        end
+      end)
+
+    {:noreply, assign(socket, replacement_rows: rows, settings_open?: true)}
+  end
+
+  def handle_event("update_replacement_rows", _params, socket) do
+    {:noreply, assign(socket, settings_open?: true)}
+  end
+
+  def handle_event("add_replacement_row", _params, socket) do
+    new_row = %{id: System.unique_integer([:positive]), find: "", replace: ""}
+
+    {:reply, %{},
+     assign(socket,
+       replacement_rows: socket.assigns.replacement_rows ++ [new_row],
+       settings_open?: true
+     )}
+  end
+
+  def handle_event("remove_replacement_row", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+    rows = Enum.reject(socket.assigns.replacement_rows, &(&1.id == id))
+    {:noreply, assign(socket, replacement_rows: rows, settings_open?: true)}
+  end
+
+  def handle_event("save_replacements", %{"replacement" => params}, socket) do
+    entries =
+      params
+      |> Map.values()
+      |> Enum.reject(fn %{"find" => f, "replace" => r} -> f == "" and r == "" end)
+
+    find_values = Enum.map(entries, & &1["find"])
+    duplicates = find_values -- Enum.uniq(find_values)
+
+    if duplicates != [] do
+      {:noreply,
+       socket
+       |> put_flash(:error, "Duplicate find value: #{Enum.uniq(duplicates) |> Enum.join(", ")}")
+       |> assign(:settings_open?, true)}
+    else
+      replacements_map =
+        Map.new(entries, fn %{"find" => f, "replace" => r} -> {String.downcase(f), r} end)
+
+      case Campaigns.update_campaign(socket.assigns.campaign, %{
+             common_replacements: replacements_map
+           }) do
+        {:ok, campaign} ->
+          campaign = Campaigns.get_campaign!(campaign.id)
+
+          replacement_rows =
+            campaign.common_replacements
+            |> Enum.map(fn {find, replace} ->
+              %{id: System.unique_integer([:positive]), find: find, replace: replace}
+            end)
+
+          {:noreply,
+           socket
+           |> put_flash(:info, "Common replacements saved.")
+           |> assign(:campaign, campaign)
+           |> assign(:replacement_rows, replacement_rows)
+           |> assign(:editing_replacements, false)
+           |> assign(:settings_open?, true)}
+
+        {:error, _changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, "Failed to save replacements.")
+           |> assign(:settings_open?, true)}
+      end
+    end
+  end
+
+  def handle_event("save_replacements", _params, socket) do
+    case Campaigns.update_campaign(socket.assigns.campaign, %{common_replacements: %{}}) do
+      {:ok, campaign} ->
+        campaign = Campaigns.get_campaign!(campaign.id)
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Common replacements saved.")
+         |> assign(:campaign, campaign)
+         |> assign(:replacement_rows, [])
+         |> assign(:editing_replacements, false)
+         |> assign(:settings_open?, true)}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to save replacements.")}
     end
   end
 
