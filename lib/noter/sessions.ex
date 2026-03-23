@@ -62,9 +62,9 @@ defmodule Noter.Sessions do
     if campaign_replacements == %{} do
       {:ok, session}
     else
-      existing = Map.get(session.corrections || %{}, "replacements", %{})
+      existing = Session.replacements(session)
       merged = Map.merge(campaign_replacements, existing)
-      corrections = Map.put(session.corrections || %{}, "replacements", merged)
+      corrections = Session.put_corrections(session, "replacements", merged)
 
       session
       |> Session.corrections_changeset(%{corrections: corrections})
@@ -110,36 +110,36 @@ defmodule Noter.Sessions do
 
   def add_replacement(%Session{} = session, find, replace) do
     replacements =
-      session.corrections
-      |> Map.get("replacements", %{})
+      session
+      |> Session.replacements()
       |> Map.put(String.downcase(find), replace)
 
-    update_corrections(session, Map.put(session.corrections, "replacements", replacements))
+    update_corrections(session, Session.put_corrections(session, "replacements", replacements))
   end
 
   def add_edit(%Session{} = session, turn_id, text) do
     edits =
-      session.corrections
-      |> Map.get("edits", %{})
+      session
+      |> Session.edits()
       |> Map.put(to_string(turn_id), text)
 
-    update_corrections(session, Map.put(session.corrections, "edits", edits))
+    update_corrections(session, Session.put_corrections(session, "edits", edits))
   end
 
   def remove_edit(%Session{} = session, turn_id) do
     edits =
-      session.corrections
-      |> Map.get("edits", %{})
+      session
+      |> Session.edits()
       |> Map.delete(to_string(turn_id))
 
-    update_corrections(session, Map.put(session.corrections, "edits", edits))
+    update_corrections(session, Session.put_corrections(session, "edits", edits))
   end
 
   def finalize(%Session{} = session) do
     alias Noter.Transcription.Transcript
 
     raw_turns = Transcript.parse_turns(session.transcript_json)
-    corrected_turns = Transcript.apply_corrections(raw_turns, session.corrections)
+    corrected_turns = Transcript.apply_corrections(raw_turns, Session.corrections(session))
     srt = Transcript.segments_to_srt(corrected_turns)
 
     session
@@ -156,18 +156,18 @@ defmodule Noter.Sessions do
   end
 
   def add_replacements(%Session{} = session, new_replacements) when is_map(new_replacements) do
-    existing = Map.get(session.corrections, "replacements", %{})
+    existing = Session.replacements(session)
     downcased = Map.new(new_replacements, fn {k, v} -> {String.downcase(k), v} end)
     merged = Map.merge(existing, downcased)
-    update_corrections(session, Map.put(session.corrections, "replacements", merged))
+    update_corrections(session, Session.put_corrections(session, "replacements", merged))
   end
 
   def remove_replacement(%Session{} = session, find) do
     replacements =
-      session.corrections
-      |> Map.get("replacements", %{})
+      session
+      |> Session.replacements()
       |> Map.delete(find)
 
-    update_corrections(session, Map.put(session.corrections, "replacements", replacements))
+    update_corrections(session, Session.put_corrections(session, "replacements", replacements))
   end
 end

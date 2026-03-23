@@ -63,7 +63,7 @@ When `@sessions_empty?` is true, the `phx-update="stream"` container isn't in th
 
 Also update `@sessions_empty?` when a session is inserted via PubSub.
 
-### B2: Nil-safety on `session.corrections` access
+### ~~B2: Nil-safety on `session.corrections` access~~ ✅
 
 **File:** `lib/noter/sessions.ex` — lines 112-117, 120-127, 129-136, 158-162, 165-171
 
