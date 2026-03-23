@@ -1147,6 +1147,10 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:transcription_status, :uploading)}
   end
 
+  def handle_event("add_replacement", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_event(
         "add_replacement",
         %{"replacement" => %{"find" => find, "replace" => replace}},
@@ -1175,6 +1179,10 @@ defmodule NoterWeb.SessionLive.Show do
     end
   end
 
+  def handle_event("remove_replacement", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_event("remove_replacement", %{"find" => find}, socket) do
     session = socket.assigns.session
 
@@ -1196,6 +1204,10 @@ defmodule NoterWeb.SessionLive.Show do
 
   def handle_event("toggle_import", _params, socket) do
     {:noreply, assign(socket, import_open?: !socket.assigns.import_open?)}
+  end
+
+  def handle_event("import_replacements", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+    {:noreply, socket}
   end
 
   def handle_event("import_replacements", %{"json" => json}, socket) do
@@ -1234,6 +1246,10 @@ defmodule NoterWeb.SessionLive.Show do
      socket
      |> assign(:replacement_form, form)
      |> push_event("focus-replace", %{})}
+  end
+
+  def handle_event("start_edit", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+    {:noreply, socket}
   end
 
   def handle_event("start_edit", %{"turn-id" => id_str}, socket) do
@@ -1281,6 +1297,10 @@ defmodule NoterWeb.SessionLive.Show do
      |> stream_insert(:turns, normal_turn)}
   end
 
+  def handle_event("save_edit", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_event("save_edit", %{"edit" => %{"text" => text}}, socket) do
     session = socket.assigns.session
     turn_id = socket.assigns.editing_turn_id
@@ -1294,6 +1314,10 @@ defmodule NoterWeb.SessionLive.Show do
     end
   end
 
+  def handle_event("delete_turn", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_event("delete_turn", %{"turn-id" => id_str}, socket) do
     session = socket.assigns.session
 
@@ -1304,6 +1328,10 @@ defmodule NoterWeb.SessionLive.Show do
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to delete turn.")}
     end
+  end
+
+  def handle_event("remove_edit", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+    {:noreply, socket}
   end
 
   def handle_event("remove_edit", %{"turn-id" => id_str}, socket) do
