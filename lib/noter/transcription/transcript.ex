@@ -27,7 +27,11 @@ defmodule Noter.Transcription.Transcript do
     |> Enum.map(fn segs ->
       first = List.first(segs)
       last = List.last(segs)
-      words = Enum.flat_map(segs, &Map.get(&1, "words", []))
+
+      words =
+        segs
+        |> Enum.flat_map(&Map.get(&1, "words", []))
+        |> merge_hyphenated_words()
 
       %{
         speaker: first["speaker"],
@@ -37,6 +41,30 @@ defmodule Noter.Transcription.Transcript do
         words: words
       }
     end)
+  end
+
+  # Merges word tokens that start with a hyphen into the previous word.
+  # E.g. [" barrel", " -chested"] becomes [" barrel-chested"]
+  defp merge_hyphenated_words(words) do
+    words
+    |> Enum.reduce([], fn word, acc ->
+      trimmed = String.trim_leading(word["word"])
+
+      case {acc, String.starts_with?(trimmed, "-")} do
+        {[prev | rest], true} ->
+          merged = %{
+            "word" => prev["word"] <> trimmed,
+            "start" => prev["start"],
+            "end" => word["end"]
+          }
+
+          [merged | rest]
+
+        _ ->
+          [word | acc]
+      end
+    end)
+    |> Enum.reverse()
   end
 
   @doc """

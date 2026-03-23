@@ -408,6 +408,7 @@ defmodule NoterWeb.SessionLive.Show do
                     <.form
                       for={@replacement_form}
                       id="replacement-form"
+                      phx-hook=".ReplacementForm"
                       phx-submit="add_replacement"
                       phx-change="validate_replacement"
                       class="shrink-0 mb-4"
@@ -420,6 +421,7 @@ defmodule NoterWeb.SessionLive.Show do
                         />
                         <.input
                           field={@replacement_form[:replace]}
+                          id="replacement-replace"
                           placeholder="Replace..."
                           class="input input-sm input-bordered flex-1"
                         />
@@ -520,6 +522,16 @@ defmodule NoterWeb.SessionLive.Show do
         </div>
       </div>
     </Layouts.app>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".ReplacementForm">
+      export default {
+        mounted() {
+          this.handleEvent("focus-replace", () => {
+            const input = this.el.querySelector("#replacement-replace")
+            if (input) requestAnimationFrame(() => input.focus())
+          })
+        }
+      }
+    </script>
     <script :type={Phoenix.LiveView.ColocatedHook} name=".Waveform">
       import WaveSurfer from "wavesurfer.js"
       import RegionsPlugin from "wavesurfer.js/dist/plugins/regions.esm.js"
@@ -806,7 +818,7 @@ defmodule NoterWeb.SessionLive.Show do
         {format_time(@turn.start)}
       </span>
       <span class={[
-        "badge badge-sm mt-0.5 shrink-0",
+        "badge badge-sm mt-0.5 shrink-0 w-16 justify-center",
         Map.get(@speaker_colors, @turn.speaker, "badge-neutral")
       ]}>
         {@turn.speaker}
@@ -1072,7 +1084,11 @@ defmodule NoterWeb.SessionLive.Show do
 
   def handle_event("prefill_replacement", %{"word" => word}, socket) do
     form = to_form(%{"find" => word, "replace" => ""}, as: :replacement)
-    {:noreply, assign(socket, :replacement_form, form)}
+
+    {:noreply,
+     socket
+     |> assign(:replacement_form, form)
+     |> push_event("focus-replace", %{})}
   end
 
   def handle_event("start_edit", %{"turn-id" => id_str}, socket) do
