@@ -63,10 +63,10 @@ defmodule NoterWeb.CampaignLive.Show do
               </.link>
             </div>
 
-            <div :if={not @sessions_empty?} id="sessions" phx-update="stream" class="space-y-2 mt-2">
-              <div class={["text-center py-6 text-base-content/50", !@sessions_empty? && "hidden"]}>
-                No sessions yet.
-              </div>
+            <div :if={@sessions_empty?} class="text-center py-6 text-base-content/50">
+              No sessions yet.
+            </div>
+            <div id="sessions" phx-update="stream" class="space-y-2 mt-2">
               <.link
                 :for={{id, session} <- @streams.sessions}
                 id={id}
@@ -467,7 +467,10 @@ defmodule NoterWeb.CampaignLive.Show do
 
   @impl true
   def handle_info({:session_updated, session}, socket) do
-    {:noreply, stream_insert(socket, :sessions, session)}
+    {:noreply,
+     socket
+     |> assign(:sessions_empty?, false)
+     |> stream_insert(:sessions, session)}
   end
 
   @impl true
