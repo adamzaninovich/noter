@@ -16,6 +16,8 @@ defmodule Noter.Application do
       {Phoenix.PubSub, name: Noter.PubSub},
       {Registry, keys: :unique, name: Noter.TranscriptionRegistry},
       {DynamicSupervisor, name: Noter.TranscriptionSupervisor, strategy: :one_for_one},
+      {Registry, keys: :unique, name: Noter.JobRegistry},
+      {Task.Supervisor, name: Noter.JobSupervisor},
       # Start to serve requests, typically the last entry
       NoterWeb.Endpoint
     ]

@@ -8,6 +8,8 @@ defmodule NoterWeb.CampaignLive.Show do
     campaign = Campaigns.get_campaign_by_slug!(slug)
     name_changeset = Campaigns.change_campaign(campaign)
 
+    if connected?(socket), do: Noter.Sessions.subscribe(campaign.id)
+
     player_rows =
       campaign.player_map
       |> Enum.map(fn {discord, character} ->
@@ -264,9 +266,14 @@ defmodule NoterWeb.CampaignLive.Show do
   defp status_badge_class(status) do
     case status do
       "done" -> "badge-success"
-      status when status in ~w(uploading transcribing reviewing) -> "badge-info"
+      status when status in ~w(uploading trimming transcribing reviewing) -> "badge-info"
       _ -> "badge-soft badge-info"
     end
+  end
+
+  @impl true
+  def handle_info({:session_updated, session}, socket) do
+    {:noreply, stream_insert(socket, :sessions, session)}
   end
 
   @impl true
@@ -420,6 +427,7 @@ defmodule NoterWeb.CampaignLive.Show do
     campaign = socket.assigns.campaign
 
     for session <- campaign.sessions do
+      Noter.Jobs.cancel_existing_transcription(session)
       File.rm_rf(Noter.Uploads.session_dir(session.id))
     end
 

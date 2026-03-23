@@ -43,6 +43,21 @@ defmodule Noter.Transcription do
     end
   end
 
+  def cancel_job(job_id) do
+    url = base_url() <> "/jobs/#{job_id}"
+
+    case Req.delete(url, receive_timeout: 10_000) do
+      {:ok, %{status: status}} when status in [200, 404, 409] ->
+        :ok
+
+      {:ok, %{body: body}} ->
+        {:error, "Cancel error: #{inspect(body)}"}
+
+      {:error, reason} ->
+        {:error, "Cancel request failed: #{inspect(reason)}"}
+    end
+  end
+
   def poll_job(job_id) do
     url = base_url() <> "/jobs/#{job_id}"
 

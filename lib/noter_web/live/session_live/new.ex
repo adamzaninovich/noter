@@ -3,7 +3,7 @@ defmodule NoterWeb.SessionLive.New do
 
   alias Noter.Campaigns
   alias Noter.Sessions
-  alias Noter.Uploads
+  alias Noter.Jobs
   import NoterWeb.SessionLive.UploadHelpers
 
   @steps [
@@ -18,6 +18,8 @@ defmodule NoterWeb.SessionLive.New do
   def mount(%{"campaign_slug" => campaign_slug}, _session, socket) do
     campaign = Campaigns.get_campaign_by_slug!(campaign_slug)
     changeset = Sessions.change_session(%Noter.Sessions.Session{campaign_id: campaign.id})
+
+    if connected?(socket), do: Jobs.subscribe_uploads(campaign.id)
 
     {:ok,
      socket
@@ -208,38 +210,13 @@ defmodule NoterWeb.SessionLive.New do
           aac_paths = consume_uploaded_entries(socket, :aac_file, &consume_to_tmp/2)
           vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
 
-          lv = self()
-          on_progress = fn status -> send(lv, {:processing_status, status}) end
-
-          {:ok, pid} =
-            Task.start(fn ->
-              on_progress.("Creating session...")
-
-              result =
-                with {:ok, session} <- Sessions.create_session(campaign, session_params),
-                     {:ok, _renamed} <-
-                       Uploads.process_uploads(
-                         session,
-                         campaign,
-                         List.first(zip_paths),
-                         List.first(aac_paths),
-                         List.first(vocab_paths),
-                         on_progress
-                       ),
-                     {:ok, _session} <- Sessions.update_session(session, %{status: "uploaded"}) do
-                  {:ok, session}
-                else
-                  {:error, %Ecto.Changeset{} = changeset} ->
-                    {:error, changeset}
-
-                  {:error, reason} ->
-                    {:error, reason}
-                end
-
-              send(lv, {:upload_processed, result})
-            end)
-
-          Process.monitor(pid)
+          Jobs.start_upload_processing(
+            session_params,
+            campaign,
+            List.first(zip_paths),
+            List.first(aac_paths),
+            List.first(vocab_paths)
+          )
 
           {:noreply, assign(socket, processing?: true, processing_status: "Creating session...")}
         else
@@ -274,16 +251,5 @@ defmodule NoterWeb.SessionLive.New do
      socket
      |> assign(:processing?, false)
      |> put_flash(:error, "File processing failed: #{reason}")}
-  end
-
-  def handle_info({:DOWN, _ref, :process, _pid, :normal}, socket) do
-    {:noreply, socket}
-  end
-
-  def handle_info({:DOWN, _ref, :process, _pid, reason}, socket) do
-    {:noreply,
-     socket
-     |> assign(:processing?, false)
-     |> put_flash(:error, "File processing crashed: #{inspect(reason)}")}
   end
 end

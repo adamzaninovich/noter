@@ -3,6 +3,7 @@ defmodule NoterWeb.SessionLive.Show do
 
   alias Noter.Sessions
   alias Noter.Uploads
+  alias Noter.Jobs
   alias Noter.Transcription
   alias Noter.Transcription.Transcript
 
@@ -22,6 +23,8 @@ defmodule NoterWeb.SessionLive.Show do
     renamed_files = Uploads.list_renamed_files(session.id)
     session_dir = Uploads.session_dir(session.id)
 
+    if connected?(socket), do: Jobs.subscribe(session.id)
+
     socket =
       socket
       |> assign(:page_title, session.name)
@@ -31,8 +34,9 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.aac")))
       |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
       |> assign(:steps, @steps)
-      |> assign(:trimming?, false)
-      |> assign(:generating_peaks?, false)
+      |> assign(:trimming?, Jobs.running?(session.id, :trim))
+      |> assign_trim_files(renamed_files, Jobs.running?(session.id, :trim))
+      |> assign(:generating_peaks?, Jobs.running?(session.id, :peaks))
       |> assign(:trim_start, session.trim_start_seconds)
       |> assign(:trim_end, session.trim_end_seconds)
       |> assign(:transcribing?, false)
@@ -948,7 +952,7 @@ defmodule NoterWeb.SessionLive.Show do
 
   @speaker_palette ~w(badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error)
 
-  @status_order ~w(uploading uploaded trimmed transcribing transcribed reviewing done)
+  @status_order ~w(uploading uploaded trimming trimmed transcribing transcribed reviewing done)
 
   defp step_complete?(current_status, step_status) do
     current_idx = Enum.find_index(@status_order, &(&1 == current_status)) || 0
@@ -967,7 +971,7 @@ defmodule NoterWeb.SessionLive.Show do
   defp status_badge_class(status) do
     case status do
       "done" -> "badge-success"
-      status when status in ~w(uploading transcribing reviewing) -> "badge-info"
+      status when status in ~w(uploading trimming transcribing reviewing) -> "badge-info"
       _ -> "badge-soft badge-info"
     end
   end
@@ -991,17 +995,7 @@ defmodule NoterWeb.SessionLive.Show do
         {:noreply, put_flash(socket, :error, "Trim start must be before trim end.")}
 
       true ->
-        lv = self()
-        session = Sessions.get_session_with_campaign!(session.id)
-
-        Task.start(fn ->
-          on_progress = fn file, percent ->
-            send(lv, {:trim_progress, file, percent})
-          end
-
-          result = Uploads.trim_session(session, start, end_val, on_progress)
-          send(lv, {:trim_complete, result, start, end_val})
-        end)
+        Jobs.start_trim(session, start, end_val)
 
         renamed = socket.assigns.renamed_files
 
@@ -1019,16 +1013,9 @@ defmodule NoterWeb.SessionLive.Show do
 
   def handle_event("start_transcription", _params, socket) do
     session = socket.assigns.session
-    lv = self()
 
     Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
-
-    Task.start(fn ->
-      case Transcription.submit_job(session.id) do
-        {:ok, job_id} -> send(lv, {:transcription_submitted, job_id})
-        {:error, reason} -> send(lv, {:transcription_submit_failed, reason})
-      end
-    end)
+    Jobs.start_transcription_submit(session)
 
     {:noreply,
      socket
@@ -1209,6 +1196,7 @@ defmodule NoterWeb.SessionLive.Show do
     session = socket.assigns.session
     campaign = socket.assigns.campaign
 
+    Jobs.cancel_existing_transcription(session)
     File.rm_rf(Uploads.session_dir(session.id))
     {:ok, _} = Sessions.delete_session(session)
 
@@ -1222,7 +1210,7 @@ defmodule NoterWeb.SessionLive.Show do
   def handle_info({:peaks_ready, session}, socket) do
     {:noreply,
      socket
-     |> assign(:session, session)
+     |> assign(:session, %{socket.assigns.session | duration_seconds: session.duration_seconds})
      |> assign(:generating_peaks?, false)
      |> assign_audio_urls(session)
      |> put_flash(:info, "Waveform ready.")}
@@ -1245,52 +1233,25 @@ defmodule NoterWeb.SessionLive.Show do
     {:noreply, assign(socket, :trim_files, trim_files)}
   end
 
-  def handle_info({:trim_complete, :ok, start, end_val}, socket) do
-    session = socket.assigns.session
-
-    case Sessions.update_session(session, %{
-           status: "trimmed",
-           trim_start_seconds: start,
-           trim_end_seconds: end_val
-         }) do
-      {:ok, session} ->
-        Uploads.cleanup_wav(session.id)
-
-        {:noreply,
-         socket
-         |> assign(:session, session)
-         |> assign(:trimming?, false)
-         |> put_flash(:info, "Audio trimmed successfully.")}
-
-      {:error, _changeset} ->
-        {:noreply,
-         socket
-         |> assign(:trimming?, false)
-         |> put_flash(:error, "Trim succeeded but failed to update session.")}
-    end
+  def handle_info({:trim_complete, :ok, session}, socket) do
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:trimming?, false)
+     |> put_flash(:info, "Audio trimmed successfully.")}
   end
 
-  def handle_info({:trim_complete, {:error, reason}, _start, _end_val}, socket) do
+  def handle_info({:trim_complete, {:error, reason}}, socket) do
     {:noreply,
      socket
      |> assign(:trimming?, false)
      |> put_flash(:error, "Trimming failed: #{reason}")}
   end
 
-  def handle_info({:transcription_submitted, job_id}, socket) do
-    session = socket.assigns.session
+  def handle_info({:transcription_submitted, _job_id}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
 
-    {:ok, session} =
-      Sessions.update_transcription(session, %{
-        status: "transcribing",
-        transcription_job_id: job_id
-      })
-
-    {:ok, _pid} =
-      DynamicSupervisor.start_child(
-        Noter.TranscriptionSupervisor,
-        {Noter.Transcription.SSEClient, session_id: session.id, job_id: job_id}
-      )
+    Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
 
     {:noreply,
      socket
@@ -1338,11 +1299,24 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   def handle_info({:transcription, :error, %{error: msg}}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
     {:noreply,
      socket
+     |> assign(:session, session)
      |> assign(:transcribing?, false)
      |> assign(:transcription_progress, nil)
      |> put_flash(:error, "Transcription failed: #{msg}")}
+  end
+
+  def handle_info({:transcription, :cancelled, _}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:transcribing?, false)
+     |> assign(:transcription_progress, nil)}
   end
 
   defp reconnect_transcription(socket, session) do
@@ -1367,8 +1341,13 @@ defmodule NoterWeb.SessionLive.Show do
             session = Sessions.get_session_with_campaign!(session.id)
             assign(socket, :session, session)
 
-          {:ok, %{"status" => "failed", "error" => error}} ->
-            put_flash(socket, :error, "Transcription failed: #{error}")
+          {:ok, %{"status" => status}} when status in ~w(failed cancelled) ->
+            Sessions.update_transcription(session, %{status: "trimmed"})
+            session = Sessions.get_session_with_campaign!(session.id)
+
+            socket
+            |> assign(:session, session)
+            |> put_flash(:error, "Transcription #{status}.")
 
           {:ok, _} ->
             {:ok, _pid} =
@@ -1392,27 +1371,13 @@ defmodule NoterWeb.SessionLive.Show do
   defp retry_peaks_if_needed(socket, session) do
     has_aac? = File.exists?(Path.join(Uploads.session_dir(session.id), "merged.aac"))
     needs_pipeline? = is_nil(session.duration_seconds) or not socket.assigns.has_merged_audio?
+    already_running? = Jobs.running?(session.id, :peaks)
 
-    if session.status == "uploaded" and needs_pipeline? and has_aac? do
-      lv = self()
-
-      Task.start(fn ->
-        run_peak_pipeline(session, lv)
-      end)
-
+    if session.status == "uploaded" and needs_pipeline? and has_aac? and not already_running? do
+      Jobs.start_peaks(session)
       assign(socket, :generating_peaks?, true)
     else
       socket
-    end
-  end
-
-  defp run_peak_pipeline(session, lv) do
-    with {:ok, _peaks_path} <- Uploads.generate_peaks(session.id),
-         {:ok, duration} <- Uploads.get_duration(session.id),
-         {:ok, updated_session} <- Sessions.update_session(session, %{duration_seconds: duration}) do
-      send(lv, {:peaks_ready, updated_session})
-    else
-      {:error, reason} -> send(lv, {:peaks_failed, reason})
     end
   end
 
@@ -1435,6 +1400,17 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:peaks_url, nil)
     end
   end
+
+  defp assign_trim_files(socket, renamed_files, true) do
+    trim_files =
+      Enum.sort(renamed_files)
+      |> Enum.map(&{&1, 0})
+      |> Kernel.++([{"merged.wav", 0}, {"merged.m4a", 0}])
+
+    assign(socket, :trim_files, trim_files)
+  end
+
+  defp assign_trim_files(socket, _renamed_files, false), do: socket
 
   defp assign_review_state(socket, session) do
     if session.status in ~w(transcribed reviewing done) do

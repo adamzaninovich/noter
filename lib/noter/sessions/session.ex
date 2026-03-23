@@ -2,7 +2,7 @@ defmodule Noter.Sessions.Session do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @valid_statuses ~w(uploading uploaded trimmed transcribing transcribed reviewing done)
+  @valid_statuses ~w(uploading uploaded trimming trimmed transcribing transcribed reviewing done)
 
   schema "sessions" do
     field :name, :string

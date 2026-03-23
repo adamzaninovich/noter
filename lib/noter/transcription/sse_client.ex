@@ -196,7 +196,23 @@ defmodule Noter.Transcription.SSEClient do
   defp dispatch_event("error", data, state) do
     error = Map.get(data, "error", "Unknown transcription error")
     Logger.error("Transcription error for session #{state.session_id}: #{error}")
+
+    Sessions.update_transcription(
+      Sessions.get_session!(state.session_id),
+      %{status: "trimmed"}
+    )
+
     broadcast(state.session_id, :error, %{error: error})
+    state
+  end
+
+  defp dispatch_event("cancelled", _data, state) do
+    Sessions.update_transcription(
+      Sessions.get_session!(state.session_id),
+      %{status: "trimmed"}
+    )
+
+    broadcast(state.session_id, :cancelled, %{})
     state
   end
 

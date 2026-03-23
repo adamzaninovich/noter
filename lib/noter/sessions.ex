@@ -4,6 +4,22 @@ defmodule Noter.Sessions do
   alias Noter.Repo
   alias Noter.Sessions.Session
 
+  def subscribe(campaign_id) do
+    Phoenix.PubSub.subscribe(Noter.PubSub, "campaign:#{campaign_id}:sessions")
+  end
+
+  defp broadcast_session_update({:ok, session} = result) do
+    Phoenix.PubSub.broadcast(
+      Noter.PubSub,
+      "campaign:#{session.campaign_id}:sessions",
+      {:session_updated, session}
+    )
+
+    result
+  end
+
+  defp broadcast_session_update(error), do: error
+
   def list_sessions(campaign_id) do
     Session
     |> where(campaign_id: ^campaign_id)
@@ -25,12 +41,14 @@ defmodule Noter.Sessions do
     session
     |> Session.changeset(attrs)
     |> Repo.update()
+    |> broadcast_session_update()
   end
 
   def update_transcription(%Session{} = session, attrs) do
     session
     |> Session.transcription_changeset(attrs)
     |> Repo.update()
+    |> broadcast_session_update()
   end
 
   def get_session_with_campaign!(id) do
@@ -64,6 +82,7 @@ defmodule Noter.Sessions do
       transcript_srt: nil
     })
     |> Repo.update()
+    |> broadcast_session_update()
   end
 
   def add_replacement(%Session{} = session, find, replace) do
@@ -103,12 +122,14 @@ defmodule Noter.Sessions do
     session
     |> Session.corrections_changeset(%{status: "done", transcript_srt: srt})
     |> Repo.update()
+    |> broadcast_session_update()
   end
 
   def unfinalize(%Session{} = session) do
     session
     |> Session.corrections_changeset(%{status: "reviewing", transcript_srt: nil})
     |> Repo.update()
+    |> broadcast_session_update()
   end
 
   def remove_replacement(%Session{} = session, find) do
