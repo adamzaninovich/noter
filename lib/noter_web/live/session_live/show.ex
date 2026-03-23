@@ -2,6 +2,7 @@ defmodule NoterWeb.SessionLive.Show do
   use NoterWeb, :live_view
 
   alias Noter.Sessions
+  alias Noter.Sessions.Session
   alias Noter.Uploads
   alias Noter.Jobs
   alias Noter.Transcription
@@ -1601,8 +1602,8 @@ defmodule NoterWeb.SessionLive.Show do
   defp assign_review_state(socket, session) do
     if session.status in ~w(transcribed reviewing done) do
       raw_turns = Transcript.parse_turns(session.transcript_json)
-      replacements = Map.get(session.corrections, "replacements", %{})
-      edits = Map.get(session.corrections, "edits", %{})
+      replacements = Session.replacements(session)
+      edits = Session.edits(session)
 
       {replaced_turns, match_counts} = Transcript.apply_replacements(raw_turns, replacements)
 
@@ -1654,8 +1655,8 @@ defmodule NoterWeb.SessionLive.Show do
 
   defp recompute_review(socket, session) do
     raw_turns = socket.assigns.raw_turns
-    replacements = Map.get(session.corrections, "replacements", %{})
-    edits = Map.get(session.corrections, "edits", %{})
+    replacements = Session.replacements(session)
+    edits = Session.edits(session)
 
     {replaced_turns, match_counts} = Transcript.apply_replacements(raw_turns, replacements)
 

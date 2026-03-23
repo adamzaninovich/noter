@@ -2,6 +2,7 @@ defmodule NoterWeb.DownloadController do
   use NoterWeb, :controller
 
   alias Noter.Sessions
+  alias Noter.Sessions.Session
   alias Noter.Uploads
   alias Noter.Transcription.Transcript
 
@@ -67,7 +68,7 @@ defmodule NoterWeb.DownloadController do
 
   defp add_transcripts(files, session, root) do
     raw_turns = Transcript.parse_turns(session.transcript_json)
-    corrected_turns = Transcript.apply_corrections(raw_turns, session.corrections)
+    corrected_turns = Transcript.apply_corrections(raw_turns, Session.corrections(session))
     srt = session.transcript_srt || Transcript.segments_to_srt(corrected_turns)
 
     corrected_json =

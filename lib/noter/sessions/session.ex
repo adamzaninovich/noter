@@ -56,6 +56,14 @@ defmodule Noter.Sessions.Session do
     end
   end
 
+  def corrections(%__MODULE__{corrections: c}), do: c || %{}
+  def replacements(%__MODULE__{corrections: c}), do: Map.get(c || %{}, "replacements", %{})
+  def edits(%__MODULE__{corrections: c}), do: Map.get(c || %{}, "edits", %{})
+
+  def put_corrections(%__MODULE__{corrections: c}, key, value) do
+    Map.put(c || %{}, key, value)
+  end
+
   defp slugify(name) do
     name
     |> String.downcase()
