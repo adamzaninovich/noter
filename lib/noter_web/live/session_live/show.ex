@@ -1584,7 +1584,7 @@ defmodule NoterWeb.SessionLive.Show do
         |> stamp_editing_state()
 
       speakers = raw_turns |> Enum.map(& &1.speaker) |> Enum.uniq()
-      speaker_colors = build_speaker_colors(speakers)
+      speaker_colors = build_speaker_colors(speakers, socket.assigns.campaign)
 
       done_stats =
         if session.status == "done" do
@@ -1701,11 +1701,33 @@ defmodule NoterWeb.SessionLive.Show do
     }
   end
 
-  defp build_speaker_colors(speakers) do
-    speakers
-    |> Enum.with_index()
-    |> Enum.into(%{}, fn {speaker, idx} ->
-      {speaker, Enum.at(@speaker_palette, rem(idx, length(@speaker_palette)))}
-    end)
+  defp build_speaker_colors(speakers, campaign) do
+    # Build a stable color index from all campaign characters, sorted alphabetically
+    all_characters =
+      campaign.player_map
+      |> Map.values()
+      |> Enum.sort()
+
+    color_index =
+      all_characters
+      |> Enum.with_index()
+      |> Map.new(fn {name, idx} ->
+        {name, Enum.at(@speaker_palette, rem(idx, length(@speaker_palette)))}
+      end)
+
+    # Assign colors to speakers: use campaign index if available, otherwise append
+    next_idx = map_size(color_index)
+
+    {colors, _} =
+      Enum.reduce(speakers, {color_index, next_idx}, fn speaker, {acc, idx} ->
+        if Map.has_key?(acc, speaker) do
+          {acc, idx}
+        else
+          color = Enum.at(@speaker_palette, rem(idx, length(@speaker_palette)))
+          {Map.put(acc, speaker, color), idx + 1}
+        end
+      end)
+
+    Map.take(colors, speakers)
   end
 end
