@@ -43,7 +43,7 @@ defp require_editable(socket),
 
 ## Bugs
 
-### B1: Stream container not rendered when `@sessions_empty?` is true
+### ~~B1: Stream container not rendered when `@sessions_empty?` is true~~ ✅
 
 **File:** `lib/noter_web/live/campaign_live/show.ex:66`
 
