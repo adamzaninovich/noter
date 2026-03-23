@@ -6,6 +6,8 @@ Instructions:
 Whenever this file is invoked by the user, find the next uncompleted issue and analyze it.
 Always discuss possible solutions before diving in.
 Once a solution is agreen upon with the user, enter plan mode and plan it out.
+Fix the issue.
+If it makes sense, do not hesitate to add tests.
 Once an issue is fixed. Edit this file and mark it complete.
 
 ---
@@ -22,7 +24,7 @@ The `DownloadController` is safe because it calls `Sessions.get_session_with_cam
 
 **Fixed:** Added controller plug to validate `session_id` is a positive integer (returns 404 otherwise), and added path containment check in `Uploads.session_dir/1` that raises if the resolved path escapes the uploads directory.
 
-### S2: No server-side guard on mutation events during "done" status
+### ~~S2: No server-side guard on mutation events during "done" status~~ ✅
 
 **File:** `lib/noter_web/live/session_live/show.ex` — `add_replacement`, `remove_replacement`, `save_edit`, `delete_turn`, `start_edit` event handlers
 
