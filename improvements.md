@@ -76,7 +76,7 @@ The `apply_campaign_replacements` function at line 65 already guards with `sessi
 - Consistently use `(session.corrections || %{})` everywhere
 - Add accessor helpers on the Session schema: `Session.replacements(session)`, `Session.edits(session)` that handle nil internally (also addresses story C4)
 
-### B3: `cancel_upload_by_ref` crashes on unrecognized upload ref
+### ~~B3: `cancel_upload_by_ref` crashes on unrecognized upload ref~~ ✅
 
 **File:** `lib/noter_web/live/session_live/upload_helpers.ex:39-44`
 

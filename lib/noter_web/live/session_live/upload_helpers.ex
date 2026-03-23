@@ -41,8 +41,13 @@ defmodule NoterWeb.SessionLive.UploadHelpers do
         r when r == socket.assigns.uploads.zip_file.ref -> :zip_file
         r when r == socket.assigns.uploads.aac_file.ref -> :aac_file
         r when r == socket.assigns.uploads.vocab_file.ref -> :vocab_file
+        _ -> nil
       end
 
-    Phoenix.LiveView.cancel_upload(socket, upload_name, ref)
+    if upload_name do
+      Phoenix.LiveView.cancel_upload(socket, upload_name, ref)
+    else
+      socket
+    end
   end
 end
