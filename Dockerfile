@@ -33,6 +33,8 @@ RUN mix release
 # --- runtime stage ---
 FROM ${RUNNER_IMAGE}
 
+LABEL org.opencontainers.image.source=https://github.com/adamzaninovich/noter
+
 ARG AUDIOWAVEFORM_VERSION=1.10.2
 ARG AUDIOWAVEFORM_DEB="audiowaveform_${AUDIOWAVEFORM_VERSION}-1-12_amd64.deb"
 

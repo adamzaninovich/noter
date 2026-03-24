@@ -13,22 +13,20 @@ fi
 INSTALL_DIR="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 TRANSCRIPTION_URL="${2:-http://host.docker.internal:8000}"
 PHX_HOST="${3:-noter.protogen.cloud}"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+IMAGE="ghcr.io/adamzaninovich/noter:latest"
 
-echo "==> Building Docker image..."
-docker build -t noter:latest "$PROJECT_DIR"
+echo "==> Pulling Docker image..."
+docker pull "$IMAGE"
 
 echo "==> Setting up $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR/uploads"
 
-SECRET_KEY_BASE="$(docker run --rm -e DATABASE_PATH=/tmp/x -e SECRET_KEY_BASE=x noter:latest bin/noter eval 'IO.puts(:crypto.strong_rand_bytes(64) |> Base.encode64())')"
+SECRET_KEY_BASE="$(docker run --rm -e DATABASE_PATH=/tmp/x -e SECRET_KEY_BASE=x "$IMAGE" bin/noter eval 'IO.puts(:crypto.strong_rand_bytes(64) |> Base.encode64())')"
 
 cat > "$INSTALL_DIR/compose.yaml" << EOF
 services:
   noter:
-    image: noter:latest
-    pull_policy: never
+    image: ${IMAGE}
     restart: unless-stopped
     ports:
       - "4000:4000"
