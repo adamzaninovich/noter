@@ -37,6 +37,8 @@ defmodule Noter.Jobs do
 
           case Uploads.trim_session(session, start_seconds, end_seconds, on_progress) do
             :ok ->
+              session = Sessions.get_session!(session_id)
+
               case Sessions.update_session(session, %{
                      status: "trimmed",
                      trim_start_seconds: start_seconds,
@@ -71,6 +73,7 @@ defmodule Noter.Jobs do
 
           with {:ok, _peaks_path} <- Uploads.generate_peaks(session_id),
                {:ok, duration} <- Uploads.get_duration(session_id),
+               session = Sessions.get_session!(session_id),
                {:ok, updated} <-
                  Sessions.update_session(session, %{duration_seconds: duration}) do
             broadcast(session_id, {:peaks_ready, updated})
@@ -104,6 +107,8 @@ defmodule Noter.Jobs do
                  on_progress
                ) do
             {:ok, _renamed} ->
+              session = Sessions.get_session!(session.id)
+
               case Sessions.update_session(session, %{status: "uploaded"}) do
                 {:ok, _} ->
                   broadcast_upload(campaign.id, {:upload_processed, {:ok, session}})
@@ -132,6 +137,8 @@ defmodule Noter.Jobs do
     Task.Supervisor.start_child(@supervisor, fn ->
       case Noter.Transcription.submit_job(session_id) do
         {:ok, job_id} ->
+          session = Sessions.get_session!(session_id)
+
           {:ok, updated} =
             Sessions.update_transcription(session, %{
               status: "transcribing",

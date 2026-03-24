@@ -138,7 +138,7 @@ Also, `find_display_turn/2` (`show.ex:1674-1683`) rebuilds patterns just to proc
 
 ## Correctness
 
-### C1: Jobs callbacks use captured (potentially stale) session struct
+### ~~C1: Jobs callbacks use captured (potentially stale) session struct~~ ✅
 
 **File:** `lib/noter/jobs.ex` — `start_trim/3` (line 40), `start_peaks/1` (line 75), `start_upload_processing/5` (line 107)
 
