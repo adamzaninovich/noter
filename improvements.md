@@ -102,7 +102,7 @@ The `case` has no fallback clause — a `CaseClauseError` will crash the LiveVie
 - Use Erlang's `:zip.create/3` with a file path instead of `:memory` (writes to disk, then serve)
 - Add a pre-built zip step to the finalization flow so the zip is ready before the user clicks download
 
-### P2: `assign_review_state` runs heavy computation on static mount
+### ~~P2: `assign_review_state` runs heavy computation on static mount~~ ✅
 
 **File:** `lib/noter_web/live/session_live/show.ex:48, 1573-1625`
 
@@ -126,7 +126,7 @@ Also, `find_display_turn/2` (`show.ex:1674-1683`) rebuilds patterns just to proc
 - Cache compiled patterns in the socket assigns and only rebuild when replacements change
 - Have `find_display_turn` accept pre-compiled patterns from the socket
 
-### P4: PubSub subscription outside `connected?` guard in `reconnect_transcription`
+### ~~P4: PubSub subscription outside `connected?` guard in `reconnect_transcription`~~ ✅
 
 **File:** `lib/noter_web/live/session_live/show.ex:1480-1527`
 

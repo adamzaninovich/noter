@@ -23,8 +23,7 @@ defmodule NoterWeb.SessionLive.Show do
 
     renamed_files = Uploads.list_renamed_files(session.id)
     session_dir = Uploads.session_dir(session.id)
-
-    if connected?(socket), do: Jobs.subscribe(session.id)
+    trimming? = Jobs.running?(session.id, :trim)
 
     socket =
       socket
@@ -35,8 +34,8 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.aac")))
       |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
       |> assign(:steps, @steps)
-      |> assign(:trimming?, Jobs.running?(session.id, :trim))
-      |> assign_trim_files(renamed_files, Jobs.running?(session.id, :trim))
+      |> assign(:trimming?, trimming?)
+      |> assign_trim_files(renamed_files, trimming?)
       |> assign(:generating_peaks?, Jobs.running?(session.id, :peaks))
       |> assign(:trim_start, session.trim_start_seconds)
       |> assign(:trim_end, session.trim_end_seconds)
@@ -44,9 +43,18 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:transcription_progress, nil)
       |> assign(:transcription_status, nil)
       |> assign_audio_urls(session)
-      |> retry_peaks_if_needed(session)
-      |> reconnect_transcription(session)
-      |> assign_review_state(session)
+
+    socket =
+      if connected?(socket) do
+        Jobs.subscribe(session.id)
+
+        socket
+        |> retry_peaks_if_needed(session)
+        |> reconnect_transcription(session)
+        |> assign_review_state(session)
+      else
+        assign_review_state_defaults(socket, session)
+      end
 
     {:ok, socket}
   end
@@ -290,8 +298,23 @@ defmodule NoterWeb.SessionLive.Show do
           </div>
         <% end %>
 
+        <%!-- Done summary skeleton --%>
+        <%= if @session.status == "done" and not @review_loaded? do %>
+          <div class="card bg-base-200 shadow-sm">
+            <div class="card-body">
+              <div class="skeleton h-6 w-48"></div>
+              <div class="flex gap-6 mt-4">
+                <div :for={_i <- 1..5} class="flex flex-col items-center gap-1">
+                  <div class="skeleton h-8 w-12"></div>
+                  <div class="skeleton h-3 w-16"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
         <%!-- Done summary card --%>
-        <%= if @session.status == "done" do %>
+        <%= if @done_stats do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <div class="flex items-center justify-between gap-2">
@@ -348,8 +371,31 @@ defmodule NoterWeb.SessionLive.Show do
           </div>
         <% end %>
 
+        <%!-- Transcript review skeleton --%>
+        <%= if @reviewing? and not @review_loaded? do %>
+          <div class="card bg-base-200 shadow-sm">
+            <div class="card-body">
+              <div class="skeleton h-6 w-48"></div>
+              <div class="skeleton h-4 w-96 mt-2"></div>
+              <div class="flex flex-col lg:flex-row gap-6 mt-4">
+                <div class="flex-1 min-w-0 space-y-3">
+                  <div :for={_i <- 1..8} class="flex gap-3">
+                    <div class="skeleton h-4 w-20 shrink-0"></div>
+                    <div class="skeleton h-4 w-full"></div>
+                  </div>
+                </div>
+                <div class="w-full lg:w-80 shrink-0 space-y-3">
+                  <div class="skeleton h-10 w-full"></div>
+                  <div class="skeleton h-10 w-full"></div>
+                  <div class="skeleton h-8 w-24"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
         <%!-- Transcript review card --%>
-        <%= if @reviewing? do %>
+        <%= if @review_loaded? and @reviewing? do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <div class="flex items-center justify-between">
@@ -1599,6 +1645,26 @@ defmodule NoterWeb.SessionLive.Show do
 
   defp assign_trim_files(socket, _renamed_files, false), do: socket
 
+  defp assign_review_state_defaults(socket, session) do
+    reviewing? = session.status in ~w(transcribed reviewing done)
+
+    socket
+    |> assign(:reviewing?, reviewing?)
+    |> assign(:review_loaded?, false)
+    |> assign(:raw_turns, [])
+    |> assign(:display_turns, [])
+    |> assign(:replacements, %{})
+    |> assign(:edits, %{})
+    |> assign(:match_counts, %{})
+    |> assign(:speaker_colors, %{})
+    |> assign(:editing_turn_id, nil)
+    |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
+    |> assign(:trimmed_audio_url, nil)
+    |> assign(:done_stats, nil)
+    |> assign(:import_open?, false)
+    |> stream(:turns, [])
+  end
+
   defp assign_review_state(socket, session) do
     if session.status in ~w(transcribed reviewing done) do
       raw_turns = Transcript.parse_turns(session.transcript_json)
@@ -1624,6 +1690,7 @@ defmodule NoterWeb.SessionLive.Show do
 
       socket
       |> assign(:reviewing?, true)
+      |> assign(:review_loaded?, true)
       |> assign(:raw_turns, raw_turns)
       |> assign(:display_turns, display_turns)
       |> assign(:replacements, replacements)
@@ -1639,6 +1706,7 @@ defmodule NoterWeb.SessionLive.Show do
     else
       socket
       |> assign(:reviewing?, false)
+      |> assign(:review_loaded?, true)
       |> assign(:raw_turns, [])
       |> assign(:display_turns, [])
       |> assign(:replacements, %{})
