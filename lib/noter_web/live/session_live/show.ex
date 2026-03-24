@@ -1404,10 +1404,13 @@ defmodule NoterWeb.SessionLive.Show do
 
     case Sessions.finalize(session) do
       {:ok, session} ->
+        %{raw_turns: raw_turns, replacements: replacements, edits: edits} = socket.assigns
+        done_stats = compute_done_stats(session, raw_turns, replacements, edits)
+
         {:noreply,
          socket
          |> assign(:session, session)
-         |> assign_review_state(session)
+         |> assign(:done_stats, done_stats)
          |> put_flash(:info, "Transcript finalized.")}
 
       {:error, _changeset} ->
@@ -1423,7 +1426,7 @@ defmodule NoterWeb.SessionLive.Show do
         {:noreply,
          socket
          |> assign(:session, session)
-         |> assign_review_state(session)}
+         |> assign(:done_stats, nil)}
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to unfinalize.")}
