@@ -46,5 +46,8 @@ npm-debug.log
 # Local secrets
 .env
 
+# Claude Code
+.claude/
+
 /priv/uploads
 .playwright-mcp
