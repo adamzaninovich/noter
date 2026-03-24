@@ -457,14 +457,6 @@ defmodule NoterWeb.CampaignLive.Show do
     """
   end
 
-  defp status_badge_class(status) do
-    case status do
-      "done" -> "badge-success"
-      status when status in ~w(uploading trimming transcribing reviewing) -> "badge-info"
-      _ -> "badge-soft badge-info"
-    end
-  end
-
   @impl true
   def handle_info({:session_updated, session}, socket) do
     {:noreply,

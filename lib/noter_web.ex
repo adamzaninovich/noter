@@ -81,6 +81,8 @@ defmodule NoterWeb do
       import Phoenix.HTML
       # Core UI components
       import NoterWeb.CoreComponents
+      # Shared session helpers (format_time, status_badge_class, etc.)
+      import NoterWeb.SessionHelpers
 
       # Common modules used in templates
       alias NoterWeb.Layouts
