@@ -90,7 +90,12 @@ defmodule Noter.MixProject do
         "esbuild noter --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "coveralls.html"],
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "coveralls.html"
+      ],
       s: ["phx.server"]
     ]
   end
