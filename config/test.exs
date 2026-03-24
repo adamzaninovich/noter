@@ -9,7 +9,7 @@ config :noter, Noter.Repo,
   database: Path.expand("../noter_test.db", __DIR__),
   pool_size: 5,
   pool: Ecto.Adapters.SQL.Sandbox,
-  busy_timeout: 5000
+  busy_timeout: 10_000
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
