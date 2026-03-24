@@ -14,42 +14,35 @@ defmodule NoterWeb.DownloadController do
       |> put_flash(:error, "Session must be finalized before downloading.")
       |> redirect(to: ~p"/campaigns/#{session.campaign.slug}/sessions/#{session.slug}")
     else
-      zip_binary = build_zip(session)
-      filename = "#{session.campaign.name} #{session.name}.zip"
+      session_dir = Uploads.session_dir(session.id)
+      root = "#{session.campaign.name} #{session.name}"
 
-      send_download(conn, {:binary, zip_binary},
-        filename: filename,
-        content_type: "application/zip"
-      )
+      entries =
+        []
+        |> add_merged_audio(session_dir, root)
+        |> add_tracks(session_dir, root)
+        |> add_transcripts(session, root)
+        |> add_vocab(session_dir, root)
+
+      filename = "#{root}.zip"
+
+      entries
+      |> Packmatic.build_stream()
+      |> Packmatic.Conn.send_chunked(conn, filename)
     end
   end
 
-  defp build_zip(session) do
-    session_dir = Uploads.session_dir(session.id)
-    root = "#{session.campaign.name} #{session.name}"
-
-    files =
-      []
-      |> add_merged_audio(session_dir, root)
-      |> add_tracks(session_dir, root)
-      |> add_transcripts(session, root)
-      |> add_vocab(session_dir, root)
-
-    {:ok, {_filename, zip_binary}} = :zip.create(~c"#{root}.zip", files, [:memory])
-    zip_binary
-  end
-
-  defp add_merged_audio(files, session_dir, root) do
+  defp add_merged_audio(entries, session_dir, root) do
     path = Path.join([session_dir, "trimmed", "merged.m4a"])
 
     if File.exists?(path) do
-      [{~c"#{root}/#{root} Merged.m4a", File.read!(path)} | files]
+      [[source: {:file, path}, path: "#{root}/#{root} Merged.m4a", method: :store] | entries]
     else
-      files
+      entries
     end
   end
 
-  defp add_tracks(files, session_dir, root) do
+  defp add_tracks(entries, session_dir, root) do
     trimmed_dir = Path.join(session_dir, "trimmed")
 
     if File.dir?(trimmed_dir) do
@@ -57,16 +50,16 @@ defmodule NoterWeb.DownloadController do
       |> File.ls!()
       |> Enum.filter(&String.ends_with?(&1, ".flac"))
       |> Enum.sort()
-      |> Enum.reduce(files, fn flac, acc ->
+      |> Enum.reduce(entries, fn flac, acc ->
         path = Path.join(trimmed_dir, flac)
-        [{~c"#{root}/tracks/#{flac}", File.read!(path)} | acc]
+        [[source: {:file, path}, path: "#{root}/tracks/#{flac}", method: :store] | acc]
       end)
     else
-      files
+      entries
     end
   end
 
-  defp add_transcripts(files, session, root) do
+  defp add_transcripts(entries, session, root) do
     raw_turns = Transcript.parse_turns(session.transcript_json)
     corrected_turns = Transcript.apply_corrections(raw_turns, Session.corrections(session))
     srt = session.transcript_srt || Transcript.segments_to_srt(corrected_turns)
@@ -87,18 +80,20 @@ defmodule NoterWeb.DownloadController do
         pretty: true
       )
 
-    files
-    |> then(&[{~c"#{root}/transcripts/merged.json", corrected_json} | &1])
-    |> then(&[{~c"#{root}/transcripts/merged.srt", srt} | &1])
+    entries
+    |> then(
+      &[[source: {:stream, [corrected_json]}, path: "#{root}/transcripts/merged.json"] | &1]
+    )
+    |> then(&[[source: {:stream, [srt]}, path: "#{root}/transcripts/merged.srt"] | &1])
   end
 
-  defp add_vocab(files, session_dir, root) do
+  defp add_vocab(entries, session_dir, root) do
     path = Path.join(session_dir, "vocab.txt")
 
     if File.exists?(path) do
-      [{~c"#{root}/vocab.txt", File.read!(path)} | files]
+      [[source: {:file, path}, path: "#{root}/vocab.txt"] | entries]
     else
-      files
+      entries
     end
   end
 end
