@@ -23,7 +23,14 @@
       "Bash(grep:*)",
       "mcp__tidewave__search_package_docs",
       "mcp__tidewave__get_logs",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(git add:*)",
+      "WebFetch(domain:hex.pm)",
+      "WebFetch(domain:www.erlang.org)",
+      "WebFetch(domain:hexdocs.pm)",
+      "WebFetch(domain:elixirforum.com)",
+      "WebFetch(domain:stackoverflow.com)",
+      "WebFetch(domain:en.wikipedia.org)"
     ]
   }
 }
