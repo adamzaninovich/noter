@@ -177,17 +177,18 @@ The campaign is preloaded here, but `update_transcription` already has a session
 
 ## Code Clarity / Structure
 
-### C4: `SessionLive.Show` is 1733 lines
+### ~~C4: `SessionLive.Show` is 1733 lines~~ ✅
 
 **File:** `lib/noter_web/live/session_live/show.ex`
 
 This module contains mount, render (~860 lines including inline JS hooks), 15+ `handle_event` callbacks, 10+ `handle_info` callbacks, and 10+ private helpers.
 
-**Suggested decomposition:**
-- Extract `turn_row/1`, `file_indicator/1` into a `SessionLive.Components` module
-- Extract the waveform trim card into its own function component
-- Move `format_time/1`, `word_diff/2`, `leading_space/1`, `strip_display_word/1`, `status_badge_class/1` into a shared `NoterWeb.SessionHelpers` module
-- Consider splitting review state management (`assign_review_state`, `recompute_review`, `diff_turns`, `stamp_editing_state`, `find_display_turn`, `build_speaker_colors`, `compute_done_stats`) into a `SessionLive.ReviewState` module
+**Fixed:** Extracted into three focused modules:
+- `NoterWeb.SessionHelpers` — shared `format_time/1` and `status_badge_class/1`
+- `NoterWeb.SessionLive.ReviewState` — review state management (8 functions)
+- `NoterWeb.SessionLive.Components` — `turn_row/1`, `file_indicator/1`, and text helpers
+
+Reduced `show.ex` from 1850 to 1438 lines.
 
 ### C5: Duplicated `slugify/1` logic
 
@@ -197,11 +198,11 @@ Identical `slugify/1` and `generate_slug/1` private functions.
 
 **Fix:** Extract to a shared module (e.g., `Noter.Slug`) with a public `slugify/1` and a changeset helper `generate_slug/2` that takes the changeset and source field.
 
-### C6: Duplicated `status_badge_class/1`
+### ~~C6: Duplicated `status_badge_class/1`~~ ✅
 
 **Files:** `lib/noter_web/live/campaign_live/show.ex:460-466` and `lib/noter_web/live/session_live/show.ex:1094-1100`
 
-Same function with identical logic. Should live in a shared helper module.
+**Fixed:** Moved to `NoterWeb.SessionHelpers` and imported via `html_helpers` in `noter_web.ex`. Removed duplicates from both LiveViews.
 
 ### C7: Raw map access on `corrections` without helpers
 
@@ -268,7 +269,8 @@ Intermittent `Exqlite.Error: Database busy` failures appear when running the ful
 
 **Affected tests:** `SessionLive.DoneGuardTest`, `SessionLive.NewTest`, `SessionsTest`, `SessionLive.ShowTest`, `UploadsTest` — all fail during setup inserts.
 
-**Fix options:**
-- Switch contention-prone test modules to `async: false`
-- Configure the SQLite `busy_timeout` in the test repo config (e.g. `busy_timeout: 5000`) to let writers retry instead of failing immediately
+**Partially mitigated:** Added `busy_timeout: 5000` in `config/test.exs`. This fixes previously-failing seeds (e.g. `--seed 66955`) but intermittent failures still occur under high parallelism.
+
+**Remaining fix options:**
+- Increase `busy_timeout` further (e.g. `10_000` or `15_000`)
 - Reduce parallelism with `max_cases` in test config
