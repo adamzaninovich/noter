@@ -36,6 +36,7 @@ defmodule NoterWeb.DownloadController do
     path = Path.join([session_dir, "trimmed", "merged.m4a"])
 
     if File.exists?(path) do
+      # method: :store skips compression since audio files are already compressed
       [[source: {:file, path}, path: "#{root}/#{root} Merged.m4a", method: :store] | entries]
     else
       entries
@@ -52,6 +53,7 @@ defmodule NoterWeb.DownloadController do
       |> Enum.sort()
       |> Enum.reduce(entries, fn flac, acc ->
         path = Path.join(trimmed_dir, flac)
+        # method: :store skips compression since audio files are already compressed
         [[source: {:file, path}, path: "#{root}/tracks/#{flac}", method: :store] | acc]
       end)
     else

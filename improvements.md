@@ -113,6 +113,8 @@ The `case` has no fallback clause — a `CaseClauseError` will crash the LiveVie
 - Use `assign_async` for the transcript parsing and replacement computation
 - Cache the computed display turns in the session struct or a separate ETS table
 
+**Future Research:** When the LiveView remounts (e.g., user navigates away and back), there's a brief skeleton flash since `@review_loaded?` resets to false. Consider using `on_mount` hooks (Phoenix LiveView's `on_mount` / `on_ params` lifecycle) to preserve state across remounts, or to restore the already-computed review state without flashing. This could be used in conjunction with the current skeleton approach for first-time loads, while avoiding the flash on subsequent remounts. Look into `LiveView.attach_hook/4` with `:handle_params` or storing review state in a session-level assign cache.
+
 ### ~~P3: `Transcript.apply_replacements` rebuilds patterns on every call~~ ✅
 
 **File:** `lib/noter/transcription/transcript.ex:88-101`
