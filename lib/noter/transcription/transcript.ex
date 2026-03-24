@@ -68,10 +68,29 @@ defmodule Noter.Transcription.Transcript do
   end
 
   @doc """
+  Pre-compiles replacement patterns for reuse across multiple `apply_replacements/3` calls.
+  Returns `{single_word_map, multi_word_patterns}`.
+  """
+  def compile_patterns(replacements) when map_size(replacements) == 0, do: {%{}, []}
+  def compile_patterns(replacements), do: replacements |> build_patterns() |> split_patterns()
+
+  @doc """
   Applies replacements to turn words. Supports multi-word find patterns by matching
   against concatenated stripped tokens. Annotates each word with `:replaced?`, `:original`.
   """
   def apply_replacements(turns, replacements) when map_size(replacements) == 0 do
+    apply_replacements(turns, replacements, {%{}, []})
+  end
+
+  def apply_replacements(turns, replacements) do
+    apply_replacements(turns, replacements, compile_patterns(replacements))
+  end
+
+  @doc """
+  Applies replacements using pre-compiled patterns from `compile_patterns/1`.
+  """
+  def apply_replacements(turns, replacements, {_single_map, _multi_patterns})
+      when map_size(replacements) == 0 do
     display_turns =
       Enum.map(turns, fn turn ->
         words =
@@ -85,10 +104,7 @@ defmodule Noter.Transcription.Transcript do
     {display_turns, %{}}
   end
 
-  def apply_replacements(turns, replacements) do
-    patterns = build_patterns(replacements)
-    {single_map, multi_patterns} = split_patterns(patterns)
-
+  def apply_replacements(turns, _replacements, {single_map, multi_patterns}) do
     {display_turns_rev, counts} =
       Enum.reduce(turns, {[], %{}}, fn turn, {turns_acc, counts_acc} ->
         {display_words, turn_counts} =
