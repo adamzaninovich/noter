@@ -204,20 +204,13 @@ Identical `slugify/1` and `generate_slug/1` private functions.
 
 **Fixed:** Moved to `NoterWeb.SessionHelpers` and imported via `html_helpers` in `noter_web.ex`. Removed duplicates from both LiveViews.
 
-### C7: Raw map access on `corrections` without helpers
+### ~~C7: Raw map access on `corrections` without helpers~~ ✅
 
 **File:** `lib/noter/sessions.ex` — throughout
 
 `session.corrections` is accessed with string keys like `Map.get(corrections, "replacements", %{})` and `Map.get(corrections, "edits", %{})` in many places. This is fragile and the string keys are easy to typo.
 
-**Fix:** Add accessor helpers on `Session` or `Sessions`:
-
-```elixir
-def replacements(%Session{corrections: c}), do: Map.get(c || %{}, "replacements", %{})
-def edits(%Session{corrections: c}), do: Map.get(c || %{}, "edits", %{})
-```
-
-This also addresses the nil-safety issue from B2.
+**Fixed:** `Session` already had `replacements/1`, `edits/1`, `corrections/1`, and `put_corrections/3` helpers. Updated `Transcript.apply_corrections/2` to accept `replacements` and `edits` as separate args instead of a raw corrections map, eliminating the last string-key access outside `Session`.
 
 ### C8: Repeated map-to-rows conversion pattern in `CampaignLive.Show`
 

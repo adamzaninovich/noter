@@ -154,7 +154,14 @@ defmodule Noter.Sessions do
     alias Noter.Transcription.Transcript
 
     raw_turns = Transcript.parse_turns(session.transcript_json)
-    corrected_turns = Transcript.apply_corrections(raw_turns, Session.corrections(session))
+
+    corrected_turns =
+      Transcript.apply_corrections(
+        raw_turns,
+        Session.replacements(session),
+        Session.edits(session)
+      )
+
     srt = Transcript.segments_to_srt(corrected_turns)
 
     session

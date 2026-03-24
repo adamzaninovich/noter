@@ -359,10 +359,7 @@ defmodule Noter.Transcription.Transcript do
   Applies the full corrections (replacements + edits) to raw turns and returns
   a flat list of corrected turn maps for finalization.
   """
-  def apply_corrections(raw_turns, corrections) do
-    replacements = Map.get(corrections, "replacements", %{})
-    edits = Map.get(corrections, "edits", %{})
-
+  def apply_corrections(raw_turns, replacements, edits) do
     {single_map, multi_patterns} =
       if map_size(replacements) > 0 do
         replacements |> build_patterns() |> split_patterns()
