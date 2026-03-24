@@ -212,21 +212,13 @@ Identical `slugify/1` and `generate_slug/1` private functions.
 
 **Fixed:** `Session` already had `replacements/1`, `edits/1`, `corrections/1`, and `put_corrections/3` helpers. Updated `Transcript.apply_corrections/2` to accept `replacements` and `edits` as separate args instead of a raw corrections map, eliminating the last string-key access outside `Session`.
 
-### C8: Repeated map-to-rows conversion pattern in `CampaignLive.Show`
+### ~~C8: Repeated map-to-rows conversion pattern in `CampaignLive.Show`~~ ✅
 
 **File:** `lib/noter_web/live/campaign_live/show.ex`
 
-The pattern of converting `player_map` / `common_replacements` to row structs with `System.unique_integer` IDs appears 6 times (mount, cancel_edit_player_map, save_player_map, cancel_edit_replacements, save_replacements, import_campaign_replacements).
+The pattern of converting `player_map` / `common_replacements` to row structs with `System.unique_integer` IDs appears 7 times.
 
-**Fix:** Extract private helpers:
-
-```elixir
-defp player_map_to_rows(player_map) do
-  Enum.map(player_map, fn {discord, character} ->
-    %{id: System.unique_integer([:positive]), discord: discord, character: character}
-  end)
-end
-```
+**Fixed:** Extracted `player_map_to_rows/1` and `replacements_to_rows/1` private helpers, replacing all 7 inline occurrences.
 
 ### C9: `@done_stats != nil` used as proxy for read-only mode
 
