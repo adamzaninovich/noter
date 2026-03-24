@@ -50,6 +50,8 @@ defmodule Noter.Sessions do
   end
 
   def update_transcription(%Session{} = session, attrs) do
+    session = Repo.preload(session, :campaign)
+
     result =
       Repo.transaction(fn ->
         with {:ok, session} <-
@@ -70,7 +72,6 @@ defmodule Noter.Sessions do
   end
 
   defp apply_campaign_replacements(session, %{status: "transcribed"}) do
-    session = Repo.preload(session, :campaign)
     campaign_replacements = session.campaign.common_replacements || %{}
 
     if campaign_replacements == %{} do

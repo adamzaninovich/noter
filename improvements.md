@@ -161,7 +161,7 @@ Sessions.update_session(session, %{status: "trimmed", ...})
 
 Wrapped both writes in `Repo.transaction/1` and moved broadcast outside the transaction.
 
-### C3: `Sessions.apply_campaign_replacements` does a redundant DB read
+### ~~C3: `Sessions.apply_campaign_replacements` does a redundant DB read~~ ✅
 
 **File:** `lib/noter/sessions.ex:59`
 
@@ -171,7 +171,7 @@ session = Repo.preload(session, :campaign)
 
 The campaign is preloaded here, but `update_transcription` already has a session that may have been preloaded upstream. Passing the campaign through or preloading earlier would avoid the extra query.
 
-**Fix:** Accept the campaign as a parameter, or preload `:campaign` on the session before entering `update_transcription`.
+**Fixed:** Moved `Repo.preload(session, :campaign)` to the top of `update_transcription` (before the transaction) and removed it from `apply_campaign_replacements`. The preload is a no-op when already loaded, and makes the dependency explicit.
 
 ---
 
