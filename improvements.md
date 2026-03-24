@@ -88,7 +88,7 @@ The `case` has no fallback clause — a `CaseClauseError` will crash the LiveVie
 
 ## Performance
 
-### P1: `DownloadController.build_zip` reads all files into memory
+### ~~P1: `DownloadController.build_zip` reads all files into memory~~ ✅
 
 **File:** `lib/noter_web/controllers/download_controller.ex:26-38`
 
@@ -259,3 +259,18 @@ config :noter, :transcription_url, "http://tycho.protogen.cloud:8000"
 This leaks an internal server address into version control in the base config (shared by all environments).
 
 **Fix:** Move to `config/dev.exs` with a comment, and require the env var in production via `runtime.exs`. Or use a localhost placeholder as the base default.
+
+---
+
+## Testing
+
+### T1: "Database busy" SQLite contention in test suite
+
+Intermittent `Exqlite.Error: Database busy` failures appear when running the full test suite with certain seeds (e.g. `--seed 66955`). Multiple async test modules that insert into the `campaigns` table can collide under SQLite's single-writer constraint.
+
+**Affected tests:** `SessionLive.DoneGuardTest`, `SessionLive.NewTest`, `SessionsTest`, `SessionLive.ShowTest`, `UploadsTest` — all fail during setup inserts.
+
+**Fix options:**
+- Switch contention-prone test modules to `async: false`
+- Configure the SQLite `busy_timeout` in the test repo config (e.g. `busy_timeout: 5000`) to let writers retry instead of failing immediately
+- Reduce parallelism with `max_cases` in test config

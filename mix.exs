@@ -66,6 +66,7 @@ defmodule Noter.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:req, "~> 0.5"},
+      {:packmatic, "~> 2.0"},
       {:tidewave, "~> 0.5", only: :dev},
       {:excoveralls, "~> 0.18", only: :test}
     ]
