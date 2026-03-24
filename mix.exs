@@ -11,7 +11,9 @@ defmodule Noter.MixProject do
       aliases: aliases(),
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
-      listeners: [Phoenix.CodeReloader]
+      listeners: [Phoenix.CodeReloader],
+      test_coverage: [tool: ExCoveralls],
+      preferred_cli_env: [coveralls: :test, "coveralls.html": :test, "coveralls.github": :test]
     ]
   end
 
@@ -64,7 +66,8 @@ defmodule Noter.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:req, "~> 0.5"},
-      {:tidewave, "~> 0.5", only: :dev}
+      {:tidewave, "~> 0.5", only: :dev},
+      {:excoveralls, "~> 0.18", only: :test}
     ]
   end
 
@@ -87,7 +90,7 @@ defmodule Noter.MixProject do
         "esbuild noter --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"],
+      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "coveralls.html"],
       s: ["phx.server"]
     ]
   end
