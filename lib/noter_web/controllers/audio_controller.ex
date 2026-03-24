@@ -3,8 +3,10 @@ defmodule NoterWeb.AudioController do
 
   alias Noter.Uploads
 
-  def merged(conn, %{"session_id" => session_id}) do
-    path = Path.join(Uploads.session_dir(session_id), "merged.wav")
+  plug :validate_session_id when action in [:merged, :trimmed_merged, :peaks]
+
+  def merged(conn, _params) do
+    path = Path.join(Uploads.session_dir(conn.assigns.session_id), "merged.wav")
 
     if File.exists?(path) do
       send_file_with_range(conn, path, "audio/wav")
@@ -13,8 +15,8 @@ defmodule NoterWeb.AudioController do
     end
   end
 
-  def trimmed_merged(conn, %{"session_id" => session_id}) do
-    path = Path.join([Uploads.session_dir(session_id), "trimmed", "merged.m4a"])
+  def trimmed_merged(conn, _params) do
+    path = Path.join([Uploads.session_dir(conn.assigns.session_id), "trimmed", "merged.m4a"])
 
     if File.exists?(path) do
       send_file_with_range(conn, path, "audio/mp4")
@@ -23,8 +25,8 @@ defmodule NoterWeb.AudioController do
     end
   end
 
-  def peaks(conn, %{"session_id" => session_id}) do
-    path = Path.join(Uploads.session_dir(session_id), "peaks.json")
+  def peaks(conn, _params) do
+    path = Path.join(Uploads.session_dir(conn.assigns.session_id), "peaks.json")
 
     if File.exists?(path) do
       conn
@@ -32,6 +34,16 @@ defmodule NoterWeb.AudioController do
       |> send_file(200, path)
     else
       send_resp(conn, 404, "Not found")
+    end
+  end
+
+  defp validate_session_id(conn, _opts) do
+    case Integer.parse(conn.params["session_id"]) do
+      {id, ""} when id > 0 ->
+        assign(conn, :session_id, id)
+
+      _ ->
+        conn |> send_resp(404, "Not found") |> halt()
     end
   end
 

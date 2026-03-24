@@ -1,4 +1,8 @@
 defmodule Noter.Transcription do
+  @moduledoc """
+  Client for submitting audio transcription jobs to the external service.
+  """
+
   alias Noter.Uploads
 
   def submit_job(session_id) do

@@ -19,24 +19,8 @@ defmodule Noter.Campaigns.Campaign do
     campaign
     |> cast(attrs, [:name, :player_map, :common_replacements])
     |> validate_required([:name])
-    |> generate_slug()
+    |> Noter.Slug.generate_slug(:name)
     |> validate_required([:slug], message: "name must contain at least one letter or number")
     |> unique_constraint(:slug, message: "a campaign with a similar name already exists")
-  end
-
-  defp generate_slug(changeset) do
-    case get_change(changeset, :name) do
-      nil -> changeset
-      name -> put_change(changeset, :slug, slugify(name))
-    end
-  end
-
-  defp slugify(name) do
-    name
-    |> String.downcase()
-    |> String.replace(~r/[^\w\s-]/u, "")
-    |> String.replace(~r/[\s_]+/, "-")
-    |> String.replace(~r/-+/, "-")
-    |> String.trim("-")
   end
 end

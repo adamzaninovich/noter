@@ -10,17 +10,8 @@ defmodule NoterWeb.CampaignLive.Show do
 
     if connected?(socket), do: Noter.Sessions.subscribe(campaign.id)
 
-    player_rows =
-      campaign.player_map
-      |> Enum.map(fn {discord, character} ->
-        %{id: System.unique_integer([:positive]), discord: discord, character: character}
-      end)
-
-    replacement_rows =
-      campaign.common_replacements
-      |> Enum.map(fn {find, replace} ->
-        %{id: System.unique_integer([:positive]), find: find, replace: replace}
-      end)
+    player_rows = player_map_to_rows(campaign.player_map)
+    replacement_rows = replacements_to_rows(campaign.common_replacements)
 
     {:ok,
      socket
@@ -63,10 +54,10 @@ defmodule NoterWeb.CampaignLive.Show do
               </.link>
             </div>
 
-            <div :if={not @sessions_empty?} id="sessions" phx-update="stream" class="space-y-2 mt-2">
-              <div class={["text-center py-6 text-base-content/50", !@sessions_empty? && "hidden"]}>
-                No sessions yet.
-              </div>
+            <div :if={@sessions_empty?} class="text-center py-6 text-base-content/50">
+              No sessions yet.
+            </div>
+            <div id="sessions" phx-update="stream" class="space-y-2 mt-2">
               <.link
                 :for={{id, session} <- @streams.sessions}
                 id={id}
@@ -457,17 +448,12 @@ defmodule NoterWeb.CampaignLive.Show do
     """
   end
 
-  defp status_badge_class(status) do
-    case status do
-      "done" -> "badge-success"
-      status when status in ~w(uploading trimming transcribing reviewing) -> "badge-info"
-      _ -> "badge-soft badge-info"
-    end
-  end
-
   @impl true
   def handle_info({:session_updated, session}, socket) do
-    {:noreply, stream_insert(socket, :sessions, session)}
+    {:noreply,
+     socket
+     |> assign(:sessions_empty?, false)
+     |> stream_insert(:sessions, session)}
   end
 
   @impl true
@@ -507,12 +493,7 @@ defmodule NoterWeb.CampaignLive.Show do
   end
 
   def handle_event("cancel_edit_player_map", _params, socket) do
-    # Reset rows from saved campaign data
-    player_rows =
-      socket.assigns.campaign.player_map
-      |> Enum.map(fn {discord, character} ->
-        %{id: System.unique_integer([:positive]), discord: discord, character: character}
-      end)
+    player_rows = player_map_to_rows(socket.assigns.campaign.player_map)
 
     {:noreply,
      socket
@@ -574,17 +555,11 @@ defmodule NoterWeb.CampaignLive.Show do
         {:ok, campaign} ->
           campaign = Campaigns.get_campaign!(campaign.id)
 
-          player_rows =
-            campaign.player_map
-            |> Enum.map(fn {discord, character} ->
-              %{id: System.unique_integer([:positive]), discord: discord, character: character}
-            end)
-
           {:noreply,
            socket
            |> put_flash(:info, "Player map saved.")
            |> assign(:campaign, campaign)
-           |> assign(:player_rows, player_rows)
+           |> assign(:player_rows, player_map_to_rows(campaign.player_map))
            |> assign(:editing_player_map, false)
            |> assign(:settings_open?, true)}
 
@@ -637,17 +612,11 @@ defmodule NoterWeb.CampaignLive.Show do
             {:ok, campaign} ->
               campaign = Campaigns.get_campaign!(campaign.id)
 
-              replacement_rows =
-                campaign.common_replacements
-                |> Enum.map(fn {find, replace} ->
-                  %{id: System.unique_integer([:positive]), find: find, replace: replace}
-                end)
-
               {:noreply,
                socket
                |> put_flash(:info, "Imported #{map_size(map)} replacement(s).")
                |> assign(:campaign, campaign)
-               |> assign(:replacement_rows, replacement_rows)
+               |> assign(:replacement_rows, replacements_to_rows(campaign.common_replacements))
                |> assign(:importing_replacements?, false)
                |> assign(:settings_open?, true)}
 
@@ -677,11 +646,7 @@ defmodule NoterWeb.CampaignLive.Show do
   end
 
   def handle_event("cancel_edit_replacements", _params, socket) do
-    replacement_rows =
-      socket.assigns.campaign.common_replacements
-      |> Enum.map(fn {find, replace} ->
-        %{id: System.unique_integer([:positive]), find: find, replace: replace}
-      end)
+    replacement_rows = replacements_to_rows(socket.assigns.campaign.common_replacements)
 
     {:noreply,
      socket
@@ -749,17 +714,11 @@ defmodule NoterWeb.CampaignLive.Show do
         {:ok, campaign} ->
           campaign = Campaigns.get_campaign!(campaign.id)
 
-          replacement_rows =
-            campaign.common_replacements
-            |> Enum.map(fn {find, replace} ->
-              %{id: System.unique_integer([:positive]), find: find, replace: replace}
-            end)
-
           {:noreply,
            socket
            |> put_flash(:info, "Common replacements saved.")
            |> assign(:campaign, campaign)
-           |> assign(:replacement_rows, replacement_rows)
+           |> assign(:replacement_rows, replacements_to_rows(campaign.common_replacements))
            |> assign(:editing_replacements, false)
            |> assign(:settings_open?, true)}
 
@@ -804,5 +763,17 @@ defmodule NoterWeb.CampaignLive.Show do
      socket
      |> put_flash(:info, "Campaign deleted.")
      |> push_navigate(to: ~p"/")}
+  end
+
+  defp player_map_to_rows(player_map) do
+    Enum.map(player_map, fn {discord, character} ->
+      %{id: System.unique_integer([:positive]), discord: discord, character: character}
+    end)
+  end
+
+  defp replacements_to_rows(replacements) do
+    Enum.map(replacements, fn {find, replace} ->
+      %{id: System.unique_integer([:positive]), find: find, replace: replace}
+    end)
   end
 end

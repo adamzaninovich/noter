@@ -1,9 +1,9 @@
 defmodule Noter.UploadsTest do
   use Noter.DataCase, async: true
 
-  alias Noter.Uploads
   alias Noter.Campaigns
   alias Noter.Sessions
+  alias Noter.Uploads
 
   setup do
     {:ok, campaign} =
@@ -21,6 +21,12 @@ defmodule Noter.UploadsTest do
     test "returns the expected path", %{session: session} do
       dir = Uploads.session_dir(session.id)
       assert String.ends_with?(dir, "priv/uploads/#{session.id}")
+    end
+
+    test "raises on path traversal attempt" do
+      assert_raise ArgumentError, ~r/outside uploads directory/, fn ->
+        Uploads.session_dir("../../../etc")
+      end
     end
   end
 
@@ -59,6 +65,16 @@ defmodule Noter.UploadsTest do
       refute File.dir?(Path.join(session_dir, "extracted"))
 
       File.rm_rf!(tmp_dir)
+    end
+  end
+
+  describe "cancel_upload_by_ref/3" do
+    alias NoterWeb.SessionLive.UploadHelpers
+
+    test "returns socket unchanged for unrecognized upload ref" do
+      socket = %Phoenix.LiveView.Socket{assigns: %{uploads: %{}}}
+      result = UploadHelpers.cancel_upload_by_ref(socket, "ref", "unknown-upload-ref")
+      assert result == socket
     end
   end
 

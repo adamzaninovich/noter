@@ -28,7 +28,7 @@ defmodule Noter.Sessions.Session do
     |> validate_inclusion(:status, @valid_statuses)
     |> validate_number(:trim_start_seconds, greater_than_or_equal_to: 0)
     |> validate_number(:trim_end_seconds, greater_than_or_equal_to: 0)
-    |> generate_slug()
+    |> Noter.Slug.generate_slug(:name)
     |> validate_required([:slug], message: "name must contain at least one letter or number")
     |> unique_constraint([:campaign_id, :slug],
       message: "a session with a similar name already exists in this campaign"
@@ -49,19 +49,11 @@ defmodule Noter.Sessions.Session do
     |> validate_inclusion(:status, @valid_statuses)
   end
 
-  defp generate_slug(changeset) do
-    case get_change(changeset, :name) do
-      nil -> changeset
-      name -> put_change(changeset, :slug, slugify(name))
-    end
-  end
+  def corrections(%__MODULE__{corrections: c}), do: c || %{}
+  def replacements(%__MODULE__{corrections: c}), do: Map.get(c || %{}, "replacements", %{})
+  def edits(%__MODULE__{corrections: c}), do: Map.get(c || %{}, "edits", %{})
 
-  defp slugify(name) do
-    name
-    |> String.downcase()
-    |> String.replace(~r/[^\w\s-]/u, "")
-    |> String.replace(~r/[\s_]+/, "-")
-    |> String.replace(~r/-+/, "-")
-    |> String.trim("-")
+  def put_corrections(%__MODULE__{corrections: c}, key, value) do
+    Map.put(c || %{}, key, value)
   end
 end

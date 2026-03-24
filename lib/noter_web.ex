@@ -81,10 +81,12 @@ defmodule NoterWeb do
       import Phoenix.HTML
       # Core UI components
       import NoterWeb.CoreComponents
+      # Shared session helpers (format_time, status_badge_class, etc.)
+      import NoterWeb.SessionHelpers
 
       # Common modules used in templates
-      alias Phoenix.LiveView.JS
       alias NoterWeb.Layouts
+      alias Phoenix.LiveView.JS
 
       # Routes generation with the ~p sigil
       unquote(verified_routes())

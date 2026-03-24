@@ -68,10 +68,29 @@ defmodule Noter.Transcription.Transcript do
   end
 
   @doc """
+  Pre-compiles replacement patterns for reuse across multiple `apply_replacements/3` calls.
+  Returns `{single_word_map, multi_word_patterns}`.
+  """
+  def compile_patterns(replacements) when map_size(replacements) == 0, do: {%{}, []}
+  def compile_patterns(replacements), do: replacements |> build_patterns() |> split_patterns()
+
+  @doc """
   Applies replacements to turn words. Supports multi-word find patterns by matching
   against concatenated stripped tokens. Annotates each word with `:replaced?`, `:original`.
   """
   def apply_replacements(turns, replacements) when map_size(replacements) == 0 do
+    apply_replacements(turns, replacements, {%{}, []})
+  end
+
+  def apply_replacements(turns, replacements) do
+    apply_replacements(turns, replacements, compile_patterns(replacements))
+  end
+
+  @doc """
+  Applies replacements using pre-compiled patterns from `compile_patterns/1`.
+  """
+  def apply_replacements(turns, replacements, {_single_map, _multi_patterns})
+      when map_size(replacements) == 0 do
     display_turns =
       Enum.map(turns, fn turn ->
         words =
@@ -85,10 +104,7 @@ defmodule Noter.Transcription.Transcript do
     {display_turns, %{}}
   end
 
-  def apply_replacements(turns, replacements) do
-    patterns = build_patterns(replacements)
-    {single_map, multi_patterns} = split_patterns(patterns)
-
+  def apply_replacements(turns, _replacements, {single_map, multi_patterns}) do
     {display_turns_rev, counts} =
       Enum.reduce(turns, {[], %{}}, fn turn, {turns_acc, counts_acc} ->
         {display_words, turn_counts} =
@@ -222,12 +238,12 @@ defmodule Noter.Transcription.Transcript do
 
   defp find_multi_match(_keys, _len, _pos, []), do: nil
 
+  # credo:disable-for-lines:36 Credo.Check.Refactor.Nesting
   defp find_multi_match(keys, len, pos, multi_patterns) do
     Enum.find_value(multi_patterns, fn {_find, _replace, _tokens, stripped_downcased} = pattern ->
       token_count = length(stripped_downcased)
 
       if pos + token_count <= len do
-        # Try exact match first
         exact? =
           stripped_downcased
           |> Enum.with_index()
@@ -236,7 +252,6 @@ defmodule Noter.Transcription.Transcript do
         if exact? do
           {pattern, token_count, false}
         else
-          # Try possessive match: all tokens match except last has 's appended
           last_idx = token_count - 1
 
           possessive? =
@@ -344,10 +359,7 @@ defmodule Noter.Transcription.Transcript do
   Applies the full corrections (replacements + edits) to raw turns and returns
   a flat list of corrected turn maps for finalization.
   """
-  def apply_corrections(raw_turns, corrections) do
-    replacements = Map.get(corrections, "replacements", %{})
-    edits = Map.get(corrections, "edits", %{})
-
+  def apply_corrections(raw_turns, replacements, edits) do
     {single_map, multi_patterns} =
       if map_size(replacements) > 0 do
         replacements |> build_patterns() |> split_patterns()
@@ -401,10 +413,8 @@ defmodule Noter.Transcription.Transcript do
     m = rem(total_m, 60)
     h = div(total_m, 60)
 
-    [h, m, s]
-    |> Enum.map(&String.pad_leading(Integer.to_string(&1), 2, "0"))
-    |> Enum.join(":")
-    |> Kernel.<>(",#{String.pad_leading(Integer.to_string(ms), 3, "0")}")
+    Enum.map_join([h, m, s], ":", &String.pad_leading(Integer.to_string(&1), 2, "0")) <>
+      ",#{String.pad_leading(Integer.to_string(ms), 3, "0")}"
   end
 
   defp strip_word(word) do

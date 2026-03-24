@@ -1,4 +1,8 @@
 defmodule Noter.Release do
+  @moduledoc """
+  Release tasks for running migrations in production deployments.
+  """
+
   @app :noter
 
   def migrate do
