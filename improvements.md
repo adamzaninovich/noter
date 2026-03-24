@@ -190,13 +190,13 @@ This module contains mount, render (~860 lines including inline JS hooks), 15+ `
 
 Reduced `show.ex` from 1850 to 1438 lines.
 
-### C5: Duplicated `slugify/1` logic
+### ~~C5: Duplicated `slugify/1` logic~~ ✅
 
 **Files:** `lib/noter/campaigns/campaign.ex:27-41` and `lib/noter/sessions/session.ex:52-66`
 
 Identical `slugify/1` and `generate_slug/1` private functions.
 
-**Fix:** Extract to a shared module (e.g., `Noter.Slug`) with a public `slugify/1` and a changeset helper `generate_slug/2` that takes the changeset and source field.
+**Fixed:** Extracted to `Noter.Slug` with public `slugify/1` and `generate_slug/2` changeset helper. Both schemas now call `Noter.Slug.generate_slug(changeset, :name)`.
 
 ### ~~C6: Duplicated `status_badge_class/1`~~ ✅
 
