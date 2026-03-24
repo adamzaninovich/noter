@@ -5,12 +5,13 @@ defmodule NoterWeb.SessionLive.ReviewState do
   Handles assign defaults, state computation, recomputation after edits,
   and speaker color assignment.
   """
-  use NoterWeb, :html
+  use Phoenix.VerifiedRoutes, endpoint: NoterWeb.Endpoint, router: NoterWeb.Router
 
   alias Noter.Sessions.Session
   alias Noter.Transcription.Transcript
 
   import NoterWeb.SessionHelpers
+  import Phoenix.Component, only: [assign: 3, to_form: 2]
   import Phoenix.LiveView, only: [stream: 3, stream: 4, stream_insert: 3]
 
   @speaker_palette ~w(badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error)

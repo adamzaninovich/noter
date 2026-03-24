@@ -6,8 +6,6 @@ defmodule NoterWeb.SessionLive.Components do
   """
   use NoterWeb, :html
 
-  import NoterWeb.SessionHelpers
-
   def file_indicator(assigns) do
     ~H"""
     <div class="flex items-center gap-1">

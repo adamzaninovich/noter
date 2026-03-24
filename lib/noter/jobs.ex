@@ -139,8 +139,8 @@ defmodule Noter.Jobs do
     session = Sessions.get_session!(session.id)
 
     case Sessions.update_session(session, %{status: "uploaded"}) do
-      {:ok, _} ->
-        broadcast_upload(campaign.id, {:upload_processed, {:ok, session}})
+      {:ok, updated} ->
+        broadcast_upload(campaign.id, {:upload_processed, {:ok, updated}})
 
       {:error, changeset} ->
         broadcast_upload(campaign.id, {:upload_processed, {:error, changeset}})

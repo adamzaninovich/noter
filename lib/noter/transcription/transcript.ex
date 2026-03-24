@@ -238,7 +238,7 @@ defmodule Noter.Transcription.Transcript do
 
   defp find_multi_match(_keys, _len, _pos, []), do: nil
 
-  # credo:disable-for-lines:266 Credo.Check.Refactor.Nesting
+  # credo:disable-for-lines:36 Credo.Check.Refactor.Nesting
   defp find_multi_match(keys, len, pos, multi_patterns) do
     Enum.find_value(multi_patterns, fn {_find, _replace, _tokens, stripped_downcased} = pattern ->
       token_count = length(stripped_downcased)
