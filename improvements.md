@@ -248,14 +248,8 @@ This leaks an internal server address into version control in the base config (s
 
 ## Testing
 
-### T1: "Database busy" SQLite contention in test suite
+### ~~T1: "Database busy" SQLite contention in test suite~~ ✅
 
 Intermittent `Exqlite.Error: Database busy` failures appear when running the full test suite with certain seeds (e.g. `--seed 66955`). Multiple async test modules that insert into the `campaigns` table can collide under SQLite's single-writer constraint.
 
-**Affected tests:** `SessionLive.DoneGuardTest`, `SessionLive.NewTest`, `SessionsTest`, `SessionLive.ShowTest`, `UploadsTest` — all fail during setup inserts.
-
-**Partially mitigated:** Added `busy_timeout: 5000` in `config/test.exs`. This fixes previously-failing seeds (e.g. `--seed 66955`) but intermittent failures still occur under high parallelism.
-
-**Remaining fix options:**
-- Increase `busy_timeout` further (e.g. `10_000` or `15_000`)
-- Reduce parallelism with `max_cases` in test config
+**Fixed:** Bumped `busy_timeout` to `10_000` and added `ExUnit.configure(max_cases: 4)` to cap async parallelism. Eliminates contention while keeping tests fast (~1.3–2.3s).
