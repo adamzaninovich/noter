@@ -10,44 +10,44 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
+PATH="$PATH:/usr/bin"
 INSTALL_DIR="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 TRANSCRIPTION_URL="${2:-http://host.docker.internal:8000}"
 PHX_HOST="${3:-noter.protogen.cloud}"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-
-echo "==> Building Docker image..."
-docker build -t noter:latest "$PROJECT_DIR"
-
 echo "==> Setting up $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR/uploads"
 
-SECRET_KEY_BASE="$(docker run --rm -e DATABASE_PATH=/tmp/x -e SECRET_KEY_BASE=x noter:latest bin/noter eval 'IO.puts(:crypto.strong_rand_bytes(64) |> Base.encode64())')"
-
-cat > "$INSTALL_DIR/compose.yaml" << EOF
+cat > "$INSTALL_DIR/compose.yaml" << 'EOF'
 services:
   noter:
-    image: noter:latest
-    pull_policy: never
+    image: ghcr.io/adamzaninovich/noter:latest
     restart: unless-stopped
     ports:
-      - "4000:4000"
+      - 4000:4000
     environment:
-      DATABASE_PATH: /app/data/noter.db
-      SECRET_KEY_BASE: "${SECRET_KEY_BASE}"
-      UPLOADS_DIR: /app/data/uploads
-      TRANSCRIPTION_URL: "${TRANSCRIPTION_URL}"
-      PHX_HOST: "${PHX_HOST}"
+      - DATABASE_PATH=/app/data/noter.db
+      - UPLOADS_DIR=/app/data/uploads
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE}
+      - TRANSCRIPTION_URL=${TRANSCRIPTION_URL}
+      - PHX_HOST=${PHX_HOST}
     volumes:
       - ./uploads:/app/data/uploads
       - noter_db:/app/data
     extra_hosts:
-      - "host.docker.internal:host-gateway"
-
+      - host.docker.internal:host-gateway
 volumes:
-  noter_db:
+  noter_db: null
 EOF
+
+if [ ! -f "$INSTALL_DIR/.env" ]; then
+  cat > "$INSTALL_DIR/.env" << EOF
+SECRET_KEY_BASE=changeme
+TRANSCRIPTION_URL=${TRANSCRIPTION_URL}
+PHX_HOST=${PHX_HOST}
+EOF
+fi
 
 echo ""
 echo "Done! To start:"
-echo "  cd $INSTALL_DIR && docker compose up -d"
+echo "  1. Edit $INSTALL_DIR/.env and set SECRET_KEY_BASE"
+echo "  2. cd $INSTALL_DIR && docker compose up -d"
