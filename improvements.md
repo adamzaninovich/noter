@@ -230,22 +230,6 @@ Using `@done_stats != nil` to mean "read-only" is indirect and will confuse futu
 
 ---
 
-## Configuration
-
-### F1: Hardcoded internal server URL in base config
-
-**File:** `config/config.exs:54`
-
-```elixir
-config :noter, :transcription_url, "http://tycho.protogen.cloud:8000"
-```
-
-This leaks an internal server address into version control in the base config (shared by all environments).
-
-**Fix:** Move to `config/dev.exs` with a comment, and require the env var in production via `runtime.exs`. Or use a localhost placeholder as the base default.
-
----
-
 ## Testing
 
 ### ~~T1: "Database busy" SQLite contention in test suite~~ ✅
