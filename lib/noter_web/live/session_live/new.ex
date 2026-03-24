@@ -2,8 +2,8 @@ defmodule NoterWeb.SessionLive.New do
   use NoterWeb, :live_view
 
   alias Noter.Campaigns
-  alias Noter.Sessions
   alias Noter.Jobs
+  alias Noter.Sessions
   import NoterWeb.SessionLive.UploadHelpers
 
   @steps [

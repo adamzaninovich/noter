@@ -1,8 +1,13 @@
 defmodule Noter.Campaigns do
+  @moduledoc """
+  Data access layer for campaign management, including CRUD operations
+  and session aggregation.
+  """
+
   import Ecto.Query
 
-  alias Noter.Repo
   alias Noter.Campaigns.Campaign
+  alias Noter.Repo
 
   def list_campaigns do
     Campaign

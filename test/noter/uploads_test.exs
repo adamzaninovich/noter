@@ -1,9 +1,9 @@
 defmodule Noter.UploadsTest do
   use Noter.DataCase, async: true
 
-  alias Noter.Uploads
   alias Noter.Campaigns
   alias Noter.Sessions
+  alias Noter.Uploads
 
   setup do
     {:ok, campaign} =

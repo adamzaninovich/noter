@@ -1,4 +1,9 @@
 defmodule Noter.Sessions do
+  @moduledoc """
+  Data access layer for session management, including CRUD operations,
+  transcription updates, and correction/replacement handling.
+  """
+
   import Ecto.Query
 
   alias Noter.Repo

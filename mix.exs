@@ -65,6 +65,7 @@ defmodule Noter.MixProject do
       {:bandit, "~> 1.5"},
       {:req, "~> 0.5"},
       {:packmatic, "~> 2.0"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:tidewave, "~> 0.5", only: :dev}
     ]
   end
@@ -88,7 +89,13 @@ defmodule Noter.MixProject do
         "esbuild noter --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"],
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "credo --strict",
+        "test"
+      ],
       s: ["phx.server"]
     ]
   end

@@ -1,12 +1,13 @@
 defmodule NoterWeb.SessionLive.Show do
   use NoterWeb, :live_view
 
+  alias Noter.Jobs
   alias Noter.Sessions
   alias Noter.Sessions.Session
-  alias Noter.Uploads
-  alias Noter.Jobs
   alias Noter.Transcription
+  alias Noter.Transcription.SSEClient
   alias Noter.Transcription.Transcript
+  alias Noter.Uploads
 
   @steps [
     {"uploading", "Upload"},
@@ -1086,9 +1087,7 @@ defmodule NoterWeb.SessionLive.Show do
     m = div(rem(total, 3600), 60)
     s = rem(total, 60)
 
-    [h, m, s]
-    |> Enum.map(&String.pad_leading(Integer.to_string(&1), 2, "0"))
-    |> Enum.join(":")
+    Enum.map_join([h, m, s], ":", &String.pad_leading(Integer.to_string(&1), 2, "0"))
   end
 
   defp format_time(_), do: "00:00:00"
@@ -1564,8 +1563,8 @@ defmodule NoterWeb.SessionLive.Show do
     if session.status == "transcribing" and session.transcription_job_id do
       Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
 
-      if Noter.Transcription.SSEClient.running?(session.id) do
-        progress = Noter.Transcription.SSEClient.get_progress(session.id)
+      if SSEClient.running?(session.id) do
+        progress = SSEClient.get_progress(session.id)
 
         socket
         |> assign(:transcribing?, true)
