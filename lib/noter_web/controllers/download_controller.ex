@@ -3,8 +3,8 @@ defmodule NoterWeb.DownloadController do
 
   alias Noter.Sessions
   alias Noter.Sessions.Session
-  alias Noter.Uploads
   alias Noter.Transcription.Transcript
+  alias Noter.Uploads
 
   def download(conn, %{"session_id" => session_id}) do
     session = Sessions.get_session_with_campaign!(session_id)

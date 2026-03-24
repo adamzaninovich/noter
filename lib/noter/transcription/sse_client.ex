@@ -1,4 +1,9 @@
 defmodule Noter.Transcription.SSEClient do
+  @moduledoc """
+  GenServer that connects to a transcription service via Server-Sent Events (SSE),
+  streams progress updates, and handles job completion notifications.
+  """
+
   use GenServer, restart: :temporary
 
   require Logger

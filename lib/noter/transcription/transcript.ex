@@ -238,12 +238,12 @@ defmodule Noter.Transcription.Transcript do
 
   defp find_multi_match(_keys, _len, _pos, []), do: nil
 
+  # credo:disable-for-lines:266 Credo.Check.Refactor.Nesting
   defp find_multi_match(keys, len, pos, multi_patterns) do
     Enum.find_value(multi_patterns, fn {_find, _replace, _tokens, stripped_downcased} = pattern ->
       token_count = length(stripped_downcased)
 
       if pos + token_count <= len do
-        # Try exact match first
         exact? =
           stripped_downcased
           |> Enum.with_index()
@@ -252,7 +252,6 @@ defmodule Noter.Transcription.Transcript do
         if exact? do
           {pattern, token_count, false}
         else
-          # Try possessive match: all tokens match except last has 's appended
           last_idx = token_count - 1
 
           possessive? =
@@ -417,10 +416,8 @@ defmodule Noter.Transcription.Transcript do
     m = rem(total_m, 60)
     h = div(total_m, 60)
 
-    [h, m, s]
-    |> Enum.map(&String.pad_leading(Integer.to_string(&1), 2, "0"))
-    |> Enum.join(":")
-    |> Kernel.<>(",#{String.pad_leading(Integer.to_string(ms), 3, "0")}")
+    Enum.map_join([h, m, s], ":", &String.pad_leading(Integer.to_string(&1), 2, "0")) <>
+      ",#{String.pad_leading(Integer.to_string(ms), 3, "0")}"
   end
 
   defp strip_word(word) do

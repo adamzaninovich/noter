@@ -1,4 +1,9 @@
 defmodule Noter.Uploads do
+  @moduledoc """
+  File system operations for session audio uploads, including directory management,
+  track processing, waveform generation, and audio trimming.
+  """
+
   alias Noter.Prep
 
   def session_dir(session_id) do

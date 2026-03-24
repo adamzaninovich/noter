@@ -29,35 +29,44 @@ defmodule Noter.Jobs do
 
       {:ok, pid} =
         Task.Supervisor.start_child(@supervisor, fn ->
-          Registry.register(@registry, {session_id, :trim}, [])
-
-          on_progress = fn file, percent ->
-            broadcast(session_id, {:trim_progress, file, percent})
-          end
-
-          case Uploads.trim_session(session, start_seconds, end_seconds, on_progress) do
-            :ok ->
-              session = Sessions.get_session!(session_id)
-
-              case Sessions.update_session(session, %{
-                     status: "trimmed",
-                     trim_start_seconds: start_seconds,
-                     trim_end_seconds: end_seconds
-                   }) do
-                {:ok, updated} ->
-                  Uploads.cleanup_wav(session_id)
-                  broadcast(session_id, {:trim_complete, :ok, updated})
-
-                {:error, _changeset} ->
-                  broadcast(session_id, {:trim_complete, {:error, "Failed to update session"}})
-              end
-
-            error ->
-              broadcast(session_id, {:trim_complete, error})
-          end
+          run_trim_task(session, start_seconds, end_seconds)
         end)
 
       {:ok, pid}
+    end
+  end
+
+  defp run_trim_task(session, start_seconds, end_seconds) do
+    session_id = session.id
+    Registry.register(@registry, {session_id, :trim}, [])
+
+    on_progress = fn file, percent ->
+      broadcast(session_id, {:trim_progress, file, percent})
+    end
+
+    case Uploads.trim_session(session, start_seconds, end_seconds, on_progress) do
+      :ok ->
+        finish_trim_task(session, session_id, start_seconds, end_seconds)
+
+      error ->
+        broadcast(session_id, {:trim_complete, error})
+    end
+  end
+
+  defp finish_trim_task(_session, session_id, start_seconds, end_seconds) do
+    session = Sessions.get_session!(session_id)
+
+    case Sessions.update_session(session, %{
+           status: "trimmed",
+           trim_start_seconds: start_seconds,
+           trim_end_seconds: end_seconds
+         }) do
+      {:ok, updated} ->
+        Uploads.cleanup_wav(session_id)
+        broadcast(session_id, {:trim_complete, :ok, updated})
+
+      {:error, _changeset} ->
+        broadcast(session_id, {:trim_complete, {:error, "Failed to update session"}})
     end
   end
 
@@ -90,43 +99,52 @@ defmodule Noter.Jobs do
   def start_upload_processing(session_params, campaign, zip_path, aac_path, vocab_path) do
     {:ok, pid} =
       Task.Supervisor.start_child(@supervisor, fn ->
-        with {:ok, session} <- Sessions.create_session(campaign, session_params) do
-          Registry.register(@registry, {session.id, :upload}, [])
-          broadcast_upload(campaign.id, {:processing_status, "Copying audio file..."})
-
-          on_progress = fn status ->
-            broadcast_upload(campaign.id, {:processing_status, status})
-          end
-
-          case Uploads.process_uploads(
-                 session,
-                 campaign,
-                 zip_path,
-                 aac_path,
-                 vocab_path,
-                 on_progress
-               ) do
-            {:ok, _renamed} ->
-              session = Sessions.get_session!(session.id)
-
-              case Sessions.update_session(session, %{status: "uploaded"}) do
-                {:ok, _} ->
-                  broadcast_upload(campaign.id, {:upload_processed, {:ok, session}})
-
-                {:error, changeset} ->
-                  broadcast_upload(campaign.id, {:upload_processed, {:error, changeset}})
-              end
-
-            {:error, reason} ->
-              broadcast_upload(campaign.id, {:upload_processed, {:error, reason}})
-          end
-        else
-          {:error, changeset} ->
-            broadcast_upload(campaign.id, {:upload_processed, {:error, changeset}})
-        end
+        run_upload_processing_task(session_params, campaign, zip_path, aac_path, vocab_path)
       end)
 
     {:ok, pid}
+  end
+
+  defp run_upload_processing_task(session_params, campaign, zip_path, aac_path, vocab_path) do
+    case Sessions.create_session(campaign, session_params) do
+      {:ok, session} ->
+        Registry.register(@registry, {session.id, :upload}, [])
+        broadcast_upload(campaign.id, {:processing_status, "Copying audio file..."})
+
+        on_progress = fn status ->
+          broadcast_upload(campaign.id, {:processing_status, status})
+        end
+
+        case Uploads.process_uploads(
+               session,
+               campaign,
+               zip_path,
+               aac_path,
+               vocab_path,
+               on_progress
+             ) do
+          {:ok, _renamed} ->
+            finish_upload_processing_task(session, campaign)
+
+          {:error, reason} ->
+            broadcast_upload(campaign.id, {:upload_processed, {:error, reason}})
+        end
+
+      {:error, changeset} ->
+        broadcast_upload(campaign.id, {:upload_processed, {:error, changeset}})
+    end
+  end
+
+  defp finish_upload_processing_task(session, campaign) do
+    session = Sessions.get_session!(session.id)
+
+    case Sessions.update_session(session, %{status: "uploaded"}) do
+      {:ok, _} ->
+        broadcast_upload(campaign.id, {:upload_processed, {:ok, session}})
+
+      {:error, changeset} ->
+        broadcast_upload(campaign.id, {:upload_processed, {:error, changeset}})
+    end
   end
 
   def start_transcription_submit(session) do
