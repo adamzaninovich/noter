@@ -63,6 +63,86 @@ defmodule Noter.SessionsTest do
     end
   end
 
+  describe "update_transcription/2" do
+    test "applies transcription and campaign replacements atomically", %{
+      campaign: campaign,
+      session: session
+    } do
+      {:ok, campaign} =
+        Campaigns.update_campaign(campaign, %{common_replacements: %{"npc" => "NPC Name"}})
+
+      session = %{session | campaign: campaign}
+
+      {:ok, updated} =
+        Sessions.update_transcription(session, %{
+          status: "transcribed",
+          transcript_json: "{}",
+          transcription_job_id: "job_123"
+        })
+
+      assert updated.status == "transcribed"
+      assert updated.transcript_json == "{}"
+      assert updated.corrections["replacements"]["npc"] == "NPC Name"
+    end
+
+    test "works without campaign replacements", %{session: session} do
+      session = Repo.preload(session, :campaign)
+
+      {:ok, updated} =
+        Sessions.update_transcription(session, %{
+          status: "transcribed",
+          transcript_json: "{}",
+          transcription_job_id: "job_123"
+        })
+
+      assert updated.status == "transcribed"
+      assert updated.corrections == nil || updated.corrections["replacements"] == nil
+    end
+
+    test "skips campaign replacements for non-transcribed status", %{
+      campaign: campaign,
+      session: session
+    } do
+      {:ok, campaign} =
+        Campaigns.update_campaign(campaign, %{common_replacements: %{"npc" => "NPC Name"}})
+
+      session = %{session | campaign: campaign}
+
+      {:ok, updated} =
+        Sessions.update_transcription(session, %{status: "transcribing"})
+
+      assert updated.status == "transcribing"
+      refute updated.corrections["replacements"]
+    end
+
+    test "broadcasts session update after successful transaction", %{
+      campaign: campaign,
+      session: session
+    } do
+      Sessions.subscribe(campaign.id)
+      session = Repo.preload(session, :campaign)
+
+      {:ok, _updated} =
+        Sessions.update_transcription(session, %{
+          status: "transcribed",
+          transcript_json: "{}"
+        })
+
+      assert_receive {:session_updated, %Session{status: "transcribed"}}
+    end
+
+    test "does not broadcast on failure", %{session: session} do
+      session = Repo.preload(session, :campaign)
+      Sessions.subscribe(session.campaign_id)
+
+      # invalid status should cause a changeset error
+      {:error, _reason} =
+        Sessions.update_transcription(session, %{status: "bogus_status"})
+
+      refute_receive {:session_updated, _}
+    end
+  end
+
   describe "nil corrections safety" do
     setup %{session: session} do
       # Force corrections to nil in the DB to simulate a NULL column
