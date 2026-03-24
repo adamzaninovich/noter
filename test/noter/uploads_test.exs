@@ -68,6 +68,16 @@ defmodule Noter.UploadsTest do
     end
   end
 
+  describe "cancel_upload_by_ref/3" do
+    alias NoterWeb.SessionLive.UploadHelpers
+
+    test "returns socket unchanged for unrecognized upload ref" do
+      socket = %Phoenix.LiveView.Socket{assigns: %{uploads: %{}}}
+      result = UploadHelpers.cancel_upload_by_ref(socket, "ref", "unknown-upload-ref")
+      assert result == socket
+    end
+  end
+
   describe "list_renamed_files/1" do
     test "lists files in renamed directory", %{session: session} do
       renamed_dir = Path.join(Uploads.session_dir(session.id), "renamed")
