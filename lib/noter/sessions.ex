@@ -45,13 +45,22 @@ defmodule Noter.Sessions do
   end
 
   def update_transcription(%Session{} = session, attrs) do
-    with {:ok, session} <-
-           session
-           |> Session.transcription_changeset(attrs)
-           |> Repo.update()
-           |> broadcast_session_update(),
-         {:ok, session} <- apply_campaign_replacements(session, attrs) do
-      {:ok, session}
+    result =
+      Repo.transaction(fn ->
+        with {:ok, session} <-
+               session
+               |> Session.transcription_changeset(attrs)
+               |> Repo.update(),
+             {:ok, session} <- apply_campaign_replacements(session, attrs) do
+          session
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, session} -> {:ok, session} |> broadcast_session_update()
+      {:error, reason} -> {:error, reason}
     end
   end
 

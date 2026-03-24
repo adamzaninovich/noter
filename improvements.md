@@ -153,15 +153,11 @@ session = Sessions.get_session!(session_id)
 Sessions.update_session(session, %{status: "trimmed", ...})
 ```
 
-### C2: `update_transcription` is not atomic across two DB writes
+### ~~C2: `update_transcription` is not atomic across two DB writes~~ ✅
 
 **File:** `lib/noter/sessions.ex:47-56`
 
-If the first `Repo.update` succeeds and broadcasts, but `apply_campaign_replacements` fails, the session has been updated in the DB without campaign replacements applied. Not wrapped in a transaction.
-
-**Fix options:**
-- Wrap both operations in `Repo.transaction/1` or `Ecto.Multi`
-- Alternatively, make `apply_campaign_replacements` infallible (log errors but don't fail the pipeline)
+Wrapped both writes in `Repo.transaction/1` and moved broadcast outside the transaction.
 
 ### C3: `Sessions.apply_campaign_replacements` does a redundant DB read
 
