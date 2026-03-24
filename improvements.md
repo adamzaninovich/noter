@@ -113,7 +113,7 @@ The `case` has no fallback clause — a `CaseClauseError` will crash the LiveVie
 - Use `assign_async` for the transcript parsing and replacement computation
 - Cache the computed display turns in the session struct or a separate ETS table
 
-### P3: `Transcript.apply_replacements` rebuilds patterns on every call
+### ~~P3: `Transcript.apply_replacements` rebuilds patterns on every call~~ ✅
 
 **File:** `lib/noter/transcription/transcript.ex:88-101`
 
