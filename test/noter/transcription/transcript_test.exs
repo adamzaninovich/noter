@@ -98,6 +98,26 @@ defmodule Noter.Transcription.TranscriptTest do
     end
   end
 
+  describe "compile_patterns/1 + apply_replacements/3" do
+    test "pre-compiled patterns produce identical results to apply_replacements/2" do
+      replacements = %{"hello" => "goodbye", "big tazo" => "Big Taszo"}
+      compiled = Transcript.compile_patterns(replacements)
+
+      turns1 = make_turns([" hello", " world"])
+      turns2 = make_turns([" big", " tazo", " hello"])
+
+      assert Transcript.apply_replacements(turns1, replacements) ==
+               Transcript.apply_replacements(turns1, replacements, compiled)
+
+      assert Transcript.apply_replacements(turns2, replacements) ==
+               Transcript.apply_replacements(turns2, replacements, compiled)
+    end
+
+    test "empty replacements compile to empty patterns" do
+      assert {%{}, []} = Transcript.compile_patterns(%{})
+    end
+  end
+
   describe "apply_replacements/2 basic" do
     test "no replacements returns words unchanged" do
       turns = make_turns([" hello", " world"])

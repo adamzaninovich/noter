@@ -1314,7 +1314,12 @@ defmodule NoterWeb.SessionLive.Show do
           |> then(fn turn ->
             replacements = socket.assigns.replacements
 
-            {[replaced_turn], _counts} = Transcript.apply_replacements([turn], replacements)
+            {[replaced_turn], _counts} =
+              Transcript.apply_replacements(
+                [turn],
+                replacements,
+                socket.assigns.compiled_patterns
+              )
 
             replaced_turn
             |> Map.get(:display_words)
@@ -1654,6 +1659,7 @@ defmodule NoterWeb.SessionLive.Show do
     |> assign(:raw_turns, [])
     |> assign(:display_turns, [])
     |> assign(:replacements, %{})
+    |> assign(:compiled_patterns, {%{}, []})
     |> assign(:edits, %{})
     |> assign(:match_counts, %{})
     |> assign(:speaker_colors, %{})
@@ -1669,9 +1675,11 @@ defmodule NoterWeb.SessionLive.Show do
     if session.status in ~w(transcribed reviewing done) do
       raw_turns = Transcript.parse_turns(session.transcript_json)
       replacements = Session.replacements(session)
+      compiled_patterns = Transcript.compile_patterns(replacements)
       edits = Session.edits(session)
 
-      {replaced_turns, match_counts} = Transcript.apply_replacements(raw_turns, replacements)
+      {replaced_turns, match_counts} =
+        Transcript.apply_replacements(raw_turns, replacements, compiled_patterns)
 
       display_turns =
         replaced_turns
@@ -1694,6 +1702,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:raw_turns, raw_turns)
       |> assign(:display_turns, display_turns)
       |> assign(:replacements, replacements)
+      |> assign(:compiled_patterns, compiled_patterns)
       |> assign(:edits, edits)
       |> assign(:match_counts, match_counts)
       |> assign(:speaker_colors, speaker_colors)
@@ -1710,6 +1719,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:raw_turns, [])
       |> assign(:display_turns, [])
       |> assign(:replacements, %{})
+      |> assign(:compiled_patterns, {%{}, []})
       |> assign(:edits, %{})
       |> assign(:match_counts, %{})
       |> assign(:speaker_colors, %{})
@@ -1724,9 +1734,11 @@ defmodule NoterWeb.SessionLive.Show do
   defp recompute_review(socket, session) do
     raw_turns = socket.assigns.raw_turns
     replacements = Session.replacements(session)
+    compiled_patterns = Transcript.compile_patterns(replacements)
     edits = Session.edits(session)
 
-    {replaced_turns, match_counts} = Transcript.apply_replacements(raw_turns, replacements)
+    {replaced_turns, match_counts} =
+      Transcript.apply_replacements(raw_turns, replacements, compiled_patterns)
 
     new_turns =
       replaced_turns
@@ -1739,6 +1751,7 @@ defmodule NoterWeb.SessionLive.Show do
     socket
     |> assign(:session, session)
     |> assign(:replacements, replacements)
+    |> assign(:compiled_patterns, compiled_patterns)
     |> assign(:edits, edits)
     |> assign(:match_counts, match_counts)
     |> assign(:display_turns, new_turns)
@@ -1771,7 +1784,12 @@ defmodule NoterWeb.SessionLive.Show do
   defp find_display_turn(socket, turn_id) do
     raw_turn = Enum.find(socket.assigns.raw_turns, &(&1.id == turn_id))
 
-    {[replaced], _counts} = Transcript.apply_replacements([raw_turn], socket.assigns.replacements)
+    {[replaced], _counts} =
+      Transcript.apply_replacements(
+        [raw_turn],
+        socket.assigns.replacements,
+        socket.assigns.compiled_patterns
+      )
 
     [replaced]
     |> Transcript.apply_edits(socket.assigns.edits)
