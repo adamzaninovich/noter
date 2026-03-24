@@ -449,12 +449,12 @@ defmodule NoterWeb.SessionLive.Show do
                     <div
                       :for={{id, turn} <- @streams.turns}
                       id={id}
-                      class={["group", @done_stats != nil && turn.deleted? && "hidden"]}
+                      class={["group", @read_only? && turn.deleted? && "hidden"]}
                     >
                       {turn_row(%{
                         turn: turn,
                         speaker_colors: @speaker_colors,
-                        read_only?: @done_stats != nil
+                        read_only?: @read_only?
                       })}
                     </div>
                   </div>
@@ -1194,6 +1194,7 @@ defmodule NoterWeb.SessionLive.Show do
          socket
          |> assign(:session, session)
          |> assign(:done_stats, done_stats)
+         |> assign(:read_only?, true)
          |> put_flash(:info, "Transcript finalized.")}
 
       {:error, _changeset} ->
@@ -1209,7 +1210,8 @@ defmodule NoterWeb.SessionLive.Show do
         {:noreply,
          socket
          |> assign(:session, session)
-         |> assign(:done_stats, nil)}
+         |> assign(:done_stats, nil)
+         |> assign(:read_only?, false)}
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to unfinalize.")}

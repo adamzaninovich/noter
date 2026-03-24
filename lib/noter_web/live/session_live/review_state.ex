@@ -32,6 +32,7 @@ defmodule NoterWeb.SessionLive.ReviewState do
     |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
     |> assign(:trimmed_audio_url, nil)
     |> assign(:done_stats, nil)
+    |> assign(:read_only?, false)
     |> assign(:import_open?, false)
     |> stream(:turns, [])
   end
@@ -75,6 +76,7 @@ defmodule NoterWeb.SessionLive.ReviewState do
       |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
       |> assign(:trimmed_audio_url, ~p"/sessions/#{session.id}/audio/trimmed")
       |> assign(:done_stats, done_stats)
+      |> assign(:read_only?, session.status == "done")
       |> assign(:import_open?, false)
       |> stream(:turns, display_turns, reset: true)
     else
@@ -92,6 +94,7 @@ defmodule NoterWeb.SessionLive.ReviewState do
       |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
       |> assign(:trimmed_audio_url, nil)
       |> assign(:done_stats, nil)
+      |> assign(:read_only?, false)
       |> assign(:import_open?, false)
     end
   end

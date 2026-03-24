@@ -220,13 +220,13 @@ The pattern of converting `player_map` / `common_replacements` to row structs wi
 
 **Fixed:** Extracted `player_map_to_rows/1` and `replacements_to_rows/1` private helpers, replacing all 7 inline occurrences.
 
-### C9: `@done_stats != nil` used as proxy for read-only mode
+### ~~C9: `@done_stats != nil` used as proxy for read-only mode~~ ✅
 
 **File:** `lib/noter_web/live/session_live/show.ex:402, 407`
 
 Using `@done_stats != nil` to mean "read-only" is indirect and will confuse future readers.
 
-**Fix:** Add a dedicated `@read_only?` assign derived from session status.
+**Fixed:** Added a dedicated `@read_only?` assign derived from session status, set in `review_state.ex` and toggled in finalize/unfinalize handlers.
 
 ---
 
