@@ -37,7 +37,7 @@ defmodule NoterWeb.DownloadController do
 
     if File.exists?(path) do
       # method: :store skips compression since audio files are already compressed
-      [[source: {:file, path}, path: "#{root}/#{root} Merged.m4a", method: :store] | entries]
+      [[source: {:file, path}, path: "#{root}/#{root} - Merged.m4a", method: :store] | entries]
     else
       entries
     end

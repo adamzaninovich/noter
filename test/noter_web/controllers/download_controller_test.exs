@@ -86,14 +86,14 @@ defmodule NoterWeb.DownloadControllerTest do
       files = unzip(conn.resp_body)
       root = "Test Campaign Session One"
 
-      assert Map.has_key?(files, "#{root}/#{root} Merged.m4a")
+      assert Map.has_key?(files, "#{root}/#{root} - Merged.m4a")
       assert Map.has_key?(files, "#{root}/tracks/track01.flac")
       assert Map.has_key?(files, "#{root}/tracks/track02.flac")
       assert Map.has_key?(files, "#{root}/transcripts/merged.json")
       assert Map.has_key?(files, "#{root}/transcripts/merged.srt")
       assert Map.has_key?(files, "#{root}/vocab.txt")
 
-      assert files["#{root}/#{root} Merged.m4a"] == "fake-m4a-data"
+      assert files["#{root}/#{root} - Merged.m4a"] == "fake-m4a-data"
       assert files["#{root}/tracks/track01.flac"] == "fake-flac-1"
       assert files["#{root}/vocab.txt"] == "dragon\nkobold\n"
     end
@@ -141,7 +141,7 @@ defmodule NoterWeb.DownloadControllerTest do
 
       assert Map.has_key?(files, "#{root}/transcripts/merged.json")
       assert Map.has_key?(files, "#{root}/transcripts/merged.srt")
-      refute Map.has_key?(files, "#{root}/#{root} Merged.m4a")
+      refute Map.has_key?(files, "#{root}/#{root} - Merged.m4a")
       refute Map.has_key?(files, "#{root}/vocab.txt")
     end
   end
