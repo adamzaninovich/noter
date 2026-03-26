@@ -62,4 +62,4 @@ COPY --from=builder --chown=noter:noter /app/_build/prod/rel/noter ./
 
 ENV PHX_SERVER=true
 
-CMD ["/bin/sh", "-c", "bin/noter eval 'Noter.Release.migrate()' && bin/noter start"]
+CMD ["bin/noter", "start"]
