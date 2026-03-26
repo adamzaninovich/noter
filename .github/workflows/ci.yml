@@ -101,12 +101,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract version from mix.exs
+        id: version
+        run: echo "value=$(grep 'version:' mix.exs | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
       - uses: docker/metadata-action@v5
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.value }}
             type=sha
       - uses: docker/build-push-action@v6
         with:
