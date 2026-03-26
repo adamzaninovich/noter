@@ -5,8 +5,13 @@ defmodule Noter.Application do
 
   use Application
 
+  require Logger
+
   @impl true
   def start(_type, _args) do
+    {:ok, version} = :application.get_key(:noter, :vsn)
+    Logger.info("Noter v#{version} starting")
+
     children = [
       NoterWeb.Telemetry,
       Noter.Repo,
