@@ -143,6 +143,36 @@ defmodule Noter.SessionsTest do
     end
   end
 
+  describe "create_session/2 broadcasts" do
+    test "broadcasts session_created on success", %{campaign: campaign} do
+      Sessions.subscribe(campaign.id)
+
+      {:ok, session} = Sessions.create_session(campaign, %{name: "New Session"})
+
+      assert_receive {:session_created, %Session{id: id}}
+      assert id == session.id
+    end
+
+    test "does not broadcast on failure", %{campaign: campaign} do
+      Sessions.subscribe(campaign.id)
+
+      {:error, _changeset} = Sessions.create_session(campaign, %{name: nil})
+
+      refute_receive {:session_created, _}
+    end
+  end
+
+  describe "delete_session/1 broadcasts" do
+    test "broadcasts session_deleted on success", %{campaign: campaign, session: session} do
+      Sessions.subscribe(campaign.id)
+
+      {:ok, deleted} = Sessions.delete_session(session)
+
+      assert_receive {:session_deleted, %Session{id: id}}
+      assert id == deleted.id
+    end
+  end
+
   describe "nil corrections safety" do
     setup %{session: session} do
       # Force corrections to nil in the DB to simulate a NULL column

@@ -25,6 +25,30 @@ defmodule Noter.Sessions do
 
   defp broadcast_session_update(error), do: error
 
+  defp broadcast_session_created({:ok, session} = result) do
+    Phoenix.PubSub.broadcast(
+      Noter.PubSub,
+      "campaign:#{session.campaign_id}:sessions",
+      {:session_created, session}
+    )
+
+    result
+  end
+
+  defp broadcast_session_created(error), do: error
+
+  defp broadcast_session_deleted({:ok, session} = result) do
+    Phoenix.PubSub.broadcast(
+      Noter.PubSub,
+      "campaign:#{session.campaign_id}:sessions",
+      {:session_deleted, session}
+    )
+
+    result
+  end
+
+  defp broadcast_session_deleted(error), do: error
+
   def list_sessions(campaign_id) do
     Session
     |> where(campaign_id: ^campaign_id)
@@ -40,6 +64,7 @@ defmodule Noter.Sessions do
     %Session{campaign_id: campaign.id}
     |> Session.changeset(attrs)
     |> Repo.insert()
+    |> broadcast_session_created()
   end
 
   def update_session(%Session{} = session, attrs) do
@@ -102,7 +127,9 @@ defmodule Noter.Sessions do
   end
 
   def delete_session(%Session{} = session) do
-    Repo.delete(session)
+    session
+    |> Repo.delete()
+    |> broadcast_session_deleted()
   end
 
   def change_session(%Session{} = session, attrs \\ %{}) do

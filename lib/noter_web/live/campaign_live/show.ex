@@ -449,11 +449,22 @@ defmodule NoterWeb.CampaignLive.Show do
   end
 
   @impl true
+  def handle_info({:session_created, session}, socket) do
+    {:noreply,
+     socket
+     |> assign(:sessions_empty?, false)
+     |> stream_insert(:sessions, session, at: 0)}
+  end
+
   def handle_info({:session_updated, session}, socket) do
     {:noreply,
      socket
      |> assign(:sessions_empty?, false)
      |> stream_insert(:sessions, session)}
+  end
+
+  def handle_info({:session_deleted, session}, socket) do
+    {:noreply, stream_delete(socket, :sessions, session)}
   end
 
   @impl true
