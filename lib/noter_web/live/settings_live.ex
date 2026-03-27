@@ -25,22 +25,22 @@ defmodule NoterWeb.SettingsLive do
   def handle_event("save", %{"settings" => params}, socket) do
     result =
       Noter.Repo.transaction(fn ->
-        for {key, value} <- params do
-          cond do
-            key in @api_key_fields and value == "" and socket.assigns.keys_set[key] ->
-              :skip
+        Enum.reduce_while(params, :ok, fn {key, value}, :ok ->
+          if key in @api_key_fields and value == "" and socket.assigns.keys_set[key] do
+            {:cont, :ok}
+          else
+            val = if key in @numeric_fields, do: parse_numeric(value), else: value
 
-            key in @numeric_fields ->
-              Settings.set!(key, parse_numeric(value))
-
-            true ->
-              Settings.set!(key, value)
+            case Settings.set(key, val) do
+              {:ok, _setting} -> {:cont, :ok}
+              {:error, changeset} -> {:halt, Noter.Repo.rollback({:failed, key, changeset})}
+            end
           end
-        end
+        end)
       end)
 
     case result do
-      {:ok, _} ->
+      {:ok, :ok} ->
         settings = Settings.all()
 
         keys_set =
@@ -53,8 +53,8 @@ defmodule NoterWeb.SettingsLive do
          |> assign(:form, to_form(settings, as: :settings))
          |> put_flash(:info, "Settings saved.")}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to save settings.")}
+      {:error, {:failed, key, _changeset}} ->
+        {:noreply, put_flash(socket, :error, "Failed to save setting: #{key}")}
     end
   end
 

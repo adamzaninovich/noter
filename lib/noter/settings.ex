@@ -25,16 +25,6 @@ defmodule Noter.Settings do
     |> Repo.insert_or_update()
   end
 
-  def set!(key, value) do
-    case set(key, value) do
-      {:ok, setting} ->
-        setting
-
-      {:error, changeset} ->
-        raise Ecto.InvalidChangesetError, changeset: changeset, action: :insert_or_update
-    end
-  end
-
   def all do
     Setting
     |> Repo.all()
