@@ -17,11 +17,8 @@ defmodule NoterWeb.Router do
   scope "/", NoterWeb do
     pipe_through :browser
 
-    live_session :settings do
+    live_session :default do
       live "/settings", SettingsLive
-    end
-
-    live_session :default, on_mount: [NoterWeb.Hooks.RequireSettings] do
       live "/", CampaignLive.Index
       live "/campaigns/:campaign_slug", CampaignLive.Show
       live "/campaigns/:campaign_slug/sessions/new", SessionLive.New
