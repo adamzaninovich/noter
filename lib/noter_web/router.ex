@@ -17,10 +17,13 @@ defmodule NoterWeb.Router do
   scope "/", NoterWeb do
     pipe_through :browser
 
-    live "/", CampaignLive.Index
-    live "/campaigns/:campaign_slug", CampaignLive.Show
-    live "/campaigns/:campaign_slug/sessions/new", SessionLive.New
-    live "/campaigns/:campaign_slug/sessions/:session_slug", SessionLive.Show
+    live_session :default do
+      live "/settings", SettingsLive
+      live "/", CampaignLive.Index
+      live "/campaigns/:campaign_slug", CampaignLive.Show
+      live "/campaigns/:campaign_slug/sessions/new", SessionLive.New
+      live "/campaigns/:campaign_slug/sessions/:session_slug", SessionLive.Show
+    end
 
     get "/sessions/:session_id/audio/merged", AudioController, :merged
     get "/sessions/:session_id/audio/trimmed", AudioController, :trimmed_merged

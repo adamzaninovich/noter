@@ -1,6 +1,8 @@
 defmodule NoterWeb.CampaignLive.Index do
   use NoterWeb, :live_view
 
+  on_mount NoterWeb.Hooks.RequireSettings
+
   alias Noter.Campaigns
 
   @impl true

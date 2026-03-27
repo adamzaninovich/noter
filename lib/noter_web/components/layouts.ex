@@ -51,6 +51,13 @@ defmodule NoterWeb.Layouts do
       </div>
     </header>
 
+    <.link
+      navigate="/settings"
+      class="fixed top-4 right-4 z-50 btn btn-ghost btn-circle btn-sm opacity-50 hover:opacity-100 transition-opacity"
+    >
+      <.icon name="hero-cog-6-tooth" class="size-5" />
+    </.link>
+
     <main class="px-4 py-20 sm:px-6 lg:px-8">
       <div class={["mx-auto space-y-4", if(@wide, do: "max-w-5xl", else: "max-w-2xl")]}>
         {render_slot(@inner_block)}

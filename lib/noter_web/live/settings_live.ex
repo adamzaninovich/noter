@@ -1,0 +1,212 @@
+defmodule NoterWeb.SettingsLive do
+  use NoterWeb, :live_view
+
+  alias Noter.Settings
+
+  @api_key_fields ~w(llm_extraction_api_key llm_writing_api_key)
+  @numeric_fields ~w(llm_extraction_temperature llm_extraction_concurrency llm_writing_temperature)
+
+  @impl true
+  def mount(_params, _session, socket) do
+    settings = Settings.all()
+
+    keys_set =
+      @api_key_fields
+      |> Map.new(fn key -> {key, Settings.configured?(key)} end)
+
+    {:ok,
+     socket
+     |> assign(:page_title, "Settings")
+     |> assign(:keys_set, keys_set)
+     |> assign(:form, to_form(settings, as: :settings))}
+  end
+
+  @impl true
+  def handle_event("save", %{"settings" => params}, socket) do
+    result =
+      Noter.Repo.transaction(fn ->
+        Enum.reduce_while(params, :ok, fn {key, value}, :ok ->
+          if key in @api_key_fields and value == "" and socket.assigns.keys_set[key] do
+            {:cont, :ok}
+          else
+            val = if key in @numeric_fields, do: parse_numeric(value), else: value
+
+            case Settings.set(key, val) do
+              {:ok, _setting} -> {:cont, :ok}
+              {:error, changeset} -> {:halt, Noter.Repo.rollback({:failed, key, changeset})}
+            end
+          end
+        end)
+      end)
+
+    case result do
+      {:ok, :ok} ->
+        settings = Settings.all()
+
+        keys_set =
+          @api_key_fields
+          |> Map.new(fn key -> {key, Settings.configured?(key)} end)
+
+        {:noreply,
+         socket
+         |> assign(:keys_set, keys_set)
+         |> assign(:form, to_form(settings, as: :settings))
+         |> put_flash(:info, "Settings saved.")}
+
+      {:error, {:failed, key, _changeset}} ->
+        {:noreply, put_flash(socket, :error, "Failed to save setting: #{key}")}
+    end
+  end
+
+  def handle_event("validate", %{"settings" => params}, socket) do
+    {:noreply, assign(socket, :form, to_form(params, as: :settings))}
+  end
+
+  def handle_event("test_transcription", _params, socket) do
+    url = socket.assigns.form[:transcription_url].value
+
+    if is_binary(url) and url != "" do
+      case Req.get(url <> "/health", receive_timeout: 5_000) do
+        {:ok, %{status: 200, body: %{"status" => "ok"}}} ->
+          {:noreply, put_flash(socket, :info, "Connection successful!")}
+
+        {:ok, %{status: status, body: body}} ->
+          {:noreply,
+           put_flash(socket, :error, "Health check failed (#{status}): #{inspect(body)}")}
+
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "Connection failed.")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "No transcription URL configured.")}
+    end
+  end
+
+  defp parse_numeric(""), do: nil
+
+  defp parse_numeric(val) when is_binary(val) do
+    case Float.parse(val) do
+      {num, ""} -> if trunc(num) == num, do: trunc(num), else: num
+      _ -> val
+    end
+  end
+
+  defp parse_numeric(val), do: val
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <Layouts.app flash={@flash}>
+      <div class="flex items-center gap-3 mb-6">
+        <.link navigate="/" class="btn btn-ghost btn-sm btn-circle">
+          <.icon name="hero-arrow-left" class="size-5" />
+        </.link>
+        <h1 class="text-2xl font-bold">Settings</h1>
+      </div>
+
+      <.form for={@form} id="settings-form" phx-change="validate" phx-submit="save" class="space-y-6">
+        <div class="card bg-base-200 shadow-sm">
+          <div class="card-body">
+            <h2 class="card-title text-lg">Transcription Service</h2>
+
+            <div class="fieldset">
+              <label for="settings_transcription_url" class="label">Transcription URL</label>
+              <div class="join w-full">
+                <input
+                  type="text"
+                  name="settings[transcription_url]"
+                  id="settings_transcription_url"
+                  value={@form[:transcription_url].value}
+                  placeholder="http://host:port"
+                  class="input join-item flex-1"
+                />
+                <button
+                  type="button"
+                  phx-click="test_transcription"
+                  class="btn btn-soft btn-accent join-item"
+                >
+                  Test Connection
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card bg-base-200 shadow-sm">
+          <div class="card-body">
+            <h2 class="card-title text-lg">LLM — Extraction Model</h2>
+
+            <.input
+              field={@form[:llm_extraction_base_url]}
+              type="text"
+              label="Base URL"
+              placeholder="https://api.openai.com/v1"
+            />
+            <.input
+              field={@form[:llm_extraction_api_key]}
+              type="password"
+              label="API Key"
+              placeholder={if @keys_set["llm_extraction_api_key"], do: "Key is set", else: ""}
+              value=""
+            />
+            <.input
+              field={@form[:llm_extraction_model]}
+              type="text"
+              label="Model"
+              placeholder="gpt-4o"
+            />
+
+            <div class="flex gap-4">
+              <div class="flex-1">
+                <.input
+                  field={@form[:llm_extraction_temperature]}
+                  type="number"
+                  label="Temperature"
+                  step="0.1"
+                />
+              </div>
+              <div class="flex-1">
+                <.input
+                  field={@form[:llm_extraction_concurrency]}
+                  type="number"
+                  label="Concurrency"
+                  placeholder="4"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card bg-base-200 shadow-sm">
+          <div class="card-body">
+            <h2 class="card-title text-lg">LLM — Writing Model</h2>
+
+            <.input
+              field={@form[:llm_writing_base_url]}
+              type="text"
+              label="Base URL"
+              placeholder="https://api.openai.com/v1"
+            />
+            <.input
+              field={@form[:llm_writing_api_key]}
+              type="password"
+              label="API Key"
+              placeholder={if @keys_set["llm_writing_api_key"], do: "Key is set", else: ""}
+              value=""
+            />
+            <.input field={@form[:llm_writing_model]} type="text" label="Model" placeholder="gpt-4o" />
+            <.input
+              field={@form[:llm_writing_temperature]}
+              type="number"
+              label="Temperature"
+              step="0.1"
+            />
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary w-full">Save Settings</button>
+      </.form>
+    </Layouts.app>
+    """
+  end
+end

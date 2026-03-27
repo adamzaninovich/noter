@@ -67,20 +67,25 @@ defmodule Noter.Transcription.SSEClient do
   def handle_continue(:connect, state) do
     parent = self()
 
-    task =
-      Task.async(fn ->
-        url = Noter.Transcription.stream_url(state.job_id)
+    case Noter.Transcription.stream_url(state.job_id) do
+      {:ok, url} ->
+        task =
+          Task.async(fn ->
+            Req.get!(url,
+              into: fn {:data, chunk}, {req, resp} ->
+                send(parent, {:sse_chunk, chunk})
+                {:cont, {req, resp}}
+              end,
+              receive_timeout: :infinity
+            )
+          end)
 
-        Req.get!(url,
-          into: fn {:data, chunk}, {req, resp} ->
-            send(parent, {:sse_chunk, chunk})
-            {:cont, {req, resp}}
-          end,
-          receive_timeout: :infinity
-        )
-      end)
+        {:noreply, %{state | task_ref: task.ref}}
 
-    {:noreply, %{state | task_ref: task.ref}}
+      {:error, :not_configured} ->
+        Logger.warning("SSE client stopping: transcription_url not configured")
+        {:stop, :normal, state}
+    end
   end
 
   @impl true
