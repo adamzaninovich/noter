@@ -83,7 +83,8 @@ defmodule Noter.Transcription.SSEClient do
         {:noreply, %{state | task_ref: task.ref}}
 
       {:error, :not_configured} ->
-        {:stop, {:error, :not_configured}, state}
+        Logger.warning("SSE client stopping: transcription_url not configured")
+        {:stop, :normal, state}
     end
   end
 
