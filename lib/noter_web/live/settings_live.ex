@@ -4,7 +4,7 @@ defmodule NoterWeb.SettingsLive do
   alias Noter.Settings
 
   @api_key_fields ~w(llm_extraction_api_key llm_writing_api_key)
-  @numeric_fields ~w(llm_extraction_temperature llm_extraction_max_tokens llm_extraction_concurrency llm_writing_temperature llm_writing_max_tokens)
+  @numeric_fields ~w(llm_extraction_temperature llm_extraction_concurrency llm_writing_temperature)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -126,17 +126,17 @@ defmodule NoterWeb.SettingsLive do
               placeholder="https://api.openai.com/v1"
             />
             <.input
-              field={@form[:llm_extraction_model]}
-              type="text"
-              label="Model"
-              placeholder="gpt-4o"
-            />
-            <.input
               field={@form[:llm_extraction_api_key]}
               type="password"
               label="API Key"
               placeholder={if @keys_set["llm_extraction_api_key"], do: "Key is set", else: ""}
               value=""
+            />
+            <.input
+              field={@form[:llm_extraction_model]}
+              type="text"
+              label="Model"
+              placeholder="gpt-4o"
             />
 
             <div class="flex gap-4">
@@ -149,10 +149,12 @@ defmodule NoterWeb.SettingsLive do
                 />
               </div>
               <div class="flex-1">
-                <.input field={@form[:llm_extraction_max_tokens]} type="number" label="Max Tokens" />
-              </div>
-              <div class="flex-1">
-                <.input field={@form[:llm_extraction_concurrency]} type="number" label="Concurrency" />
+                <.input
+                  field={@form[:llm_extraction_concurrency]}
+                  type="number"
+                  label="Concurrency"
+                  placeholder="4"
+                />
               </div>
             </div>
           </div>
@@ -168,7 +170,6 @@ defmodule NoterWeb.SettingsLive do
               label="Base URL"
               placeholder="https://api.openai.com/v1"
             />
-            <.input field={@form[:llm_writing_model]} type="text" label="Model" placeholder="gpt-4o" />
             <.input
               field={@form[:llm_writing_api_key]}
               type="password"
@@ -176,20 +177,13 @@ defmodule NoterWeb.SettingsLive do
               placeholder={if @keys_set["llm_writing_api_key"], do: "Key is set", else: ""}
               value=""
             />
-
-            <div class="flex gap-4">
-              <div class="flex-1">
-                <.input
-                  field={@form[:llm_writing_temperature]}
-                  type="number"
-                  label="Temperature"
-                  step="0.1"
-                />
-              </div>
-              <div class="flex-1">
-                <.input field={@form[:llm_writing_max_tokens]} type="number" label="Max Tokens" />
-              </div>
-            </div>
+            <.input field={@form[:llm_writing_model]} type="text" label="Model" placeholder="gpt-4o" />
+            <.input
+              field={@form[:llm_writing_temperature]}
+              type="number"
+              label="Temperature"
+              step="0.1"
+            />
           </div>
         </div>
 
