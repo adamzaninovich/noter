@@ -82,6 +82,7 @@ defmodule Noter.Transcription do
   end
 
   defp base_url do
-    Application.fetch_env!(:noter, :transcription_url)
+    Noter.Settings.get("transcription_url") ||
+      raise "transcription_url not configured — visit /settings"
   end
 end

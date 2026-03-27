@@ -20,10 +20,6 @@ if System.get_env("PHX_SERVER") do
   config :noter, NoterWeb.Endpoint, server: true
 end
 
-if url = System.get_env("TRANSCRIPTION_URL") do
-  config :noter, :transcription_url, url
-end
-
 if dir = System.get_env("UPLOADS_DIR") do
   config :noter, :uploads_dir, dir
 end
