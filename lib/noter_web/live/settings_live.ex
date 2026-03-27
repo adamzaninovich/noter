@@ -58,19 +58,24 @@ defmodule NoterWeb.SettingsLive do
     end
   end
 
-  def handle_event("test_transcription", _params, socket) do
-    url = Settings.get("transcription_url")
+  def handle_event("validate", %{"settings" => params}, socket) do
+    {:noreply, assign(socket, :form, to_form(params, as: :settings))}
+  end
 
-    if url && url != "" do
+  def handle_event("test_transcription", _params, socket) do
+    url = socket.assigns.form[:transcription_url].value
+
+    if is_binary(url) and url != "" do
       case Req.get(url <> "/health", receive_timeout: 5_000) do
         {:ok, %{status: 200, body: %{"status" => "ok"}}} ->
           {:noreply, put_flash(socket, :info, "Connection successful!")}
 
         {:ok, %{status: status, body: body}} ->
-          {:noreply, put_flash(socket, :error, "Health check failed (#{status}): #{inspect(body)}")}
+          {:noreply,
+           put_flash(socket, :error, "Health check failed (#{status}): #{inspect(body)}")}
 
-        {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Connection failed: #{inspect(reason)}")}
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "Connection failed.")}
       end
     else
       {:noreply, put_flash(socket, :error, "No transcription URL configured.")}
@@ -92,25 +97,37 @@ defmodule NoterWeb.SettingsLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash}>
-      <h1 class="text-2xl font-bold mb-6">Settings</h1>
+      <div class="flex items-center gap-3 mb-6">
+        <.link navigate="/" class="btn btn-ghost btn-sm btn-circle">
+          <.icon name="hero-arrow-left" class="size-5" />
+        </.link>
+        <h1 class="text-2xl font-bold">Settings</h1>
+      </div>
 
-      <.form for={@form} id="settings-form" phx-submit="save" class="space-y-6">
+      <.form for={@form} id="settings-form" phx-change="validate" phx-submit="save" class="space-y-6">
         <div class="card bg-base-200 shadow-sm">
           <div class="card-body">
             <h2 class="card-title text-lg">Transcription Service</h2>
 
-            <div class="flex items-center gap-2">
-              <div class="flex-1 [&_.fieldset]:mb-0">
-                <.input
-                  field={@form[:transcription_url]}
+            <div class="fieldset">
+              <label for="settings_transcription_url" class="label">Transcription URL</label>
+              <div class="join w-full">
+                <input
                   type="text"
-                  label="Transcription URL"
+                  name="settings[transcription_url]"
+                  id="settings_transcription_url"
+                  value={@form[:transcription_url].value}
                   placeholder="http://host:port"
+                  class="input join-item flex-1"
                 />
+                <button
+                  type="button"
+                  phx-click="test_transcription"
+                  class="btn btn-soft btn-accent join-item"
+                >
+                  Test Connection
+                </button>
               </div>
-              <button type="button" phx-click="test_transcription" class="btn btn-outline btn-sm mt-4">
-                Test Connection
-              </button>
             </div>
           </div>
         </div>
