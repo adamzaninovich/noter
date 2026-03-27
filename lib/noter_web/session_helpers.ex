@@ -16,6 +16,7 @@ defmodule NoterWeb.SessionHelpers do
 
   def status_badge_class(status) do
     case status do
+      "reviewed" -> "badge-success"
       "done" -> "badge-success"
       status when status in ~w(uploading trimming transcribing reviewing) -> "badge-info"
       _ -> "badge-soft badge-info"

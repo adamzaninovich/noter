@@ -138,7 +138,7 @@ defmodule Noter.Sessions do
 
   def update_corrections(%Session{} = session, corrections_map) do
     status =
-      if session.status in ~w(transcribed done), do: "reviewing", else: session.status
+      if session.status in ~w(transcribed reviewed done), do: "reviewing", else: session.status
 
     session
     |> Session.corrections_changeset(%{
@@ -192,7 +192,7 @@ defmodule Noter.Sessions do
     srt = Transcript.segments_to_srt(corrected_turns)
 
     session
-    |> Session.corrections_changeset(%{status: "done", transcript_srt: srt})
+    |> Session.corrections_changeset(%{status: "reviewed", transcript_srt: srt})
     |> Repo.update()
     |> broadcast_session_update()
   end
@@ -209,6 +209,21 @@ defmodule Noter.Sessions do
     downcased = Map.new(new_replacements, fn {k, v} -> {String.downcase(k), v} end)
     merged = Map.merge(existing, downcased)
     update_corrections(session, Session.put_corrections(session, "replacements", merged))
+  end
+
+  def update_session_notes(%Session{} = session, attrs) do
+    session
+    |> Session.notes_changeset(attrs)
+    |> Repo.update()
+    |> broadcast_session_update()
+  end
+
+  def clear_session_notes(%Session{} = session) do
+    update_session_notes(session, %{
+      session_notes: nil,
+      notes_status: nil,
+      notes_error: nil
+    })
   end
 
   def remove_replacement(%Session{} = session, find) do

@@ -24,7 +24,7 @@ defmodule NoterWeb.DownloadControllerTest do
     {:ok, session} = Sessions.create_session(campaign, %{name: "Session One"})
 
     transcript = Keyword.get(opts, :transcript_json, @transcript_json)
-    status = Keyword.get(opts, :status, "done")
+    status = Keyword.get(opts, :status, "reviewed")
 
     {:ok, session} =
       session
