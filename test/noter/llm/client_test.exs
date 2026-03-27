@@ -131,13 +131,8 @@ defmodule Noter.LLM.ClientTest do
     test "falls back to structured on invalid JSON response" do
       setup_settings(:extraction)
 
-      call_count = :counters.new(1, [:atomics])
-
       plug =
         plug_for(fn conn ->
-          :counters.add(call_count, 1, 1)
-          _count = :counters.get(call_count, 1)
-
           {:ok, body, conn} = Plug.Conn.read_body(conn)
           decoded = Jason.decode!(body)
 

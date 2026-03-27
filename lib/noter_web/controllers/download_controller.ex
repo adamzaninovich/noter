@@ -9,7 +9,7 @@ defmodule NoterWeb.DownloadController do
   def download(conn, %{"session_id" => session_id}) do
     session = Sessions.get_session_with_campaign!(session_id)
 
-    if session.status in ~w(reviewed done) do
+    if Session.finalized?(session) do
       session_dir = Uploads.session_dir(session.id)
       root = "#{session.campaign.name} #{session.name}"
 

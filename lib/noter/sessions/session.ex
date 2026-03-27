@@ -56,8 +56,17 @@ defmodule Noter.Sessions.Session do
   def notes_changeset(session, attrs) do
     session
     |> cast(attrs, [:session_notes, :notes_status, :notes_error, :context])
-    |> validate_inclusion(:notes_status, ~w(pending running complete error))
+    |> then(fn changeset ->
+      if Ecto.Changeset.get_change(changeset, :notes_status) do
+        validate_inclusion(changeset, :notes_status, ~w(pending running complete error))
+      else
+        changeset
+      end
+    end)
   end
+
+  def finalized?(%__MODULE__{status: status}), do: status in ~w(reviewed done)
+  def finalized?(status) when is_binary(status), do: status in ~w(reviewed done)
 
   def corrections(%__MODULE__{corrections: c}), do: c || %{}
   def replacements(%__MODULE__{corrections: c}), do: Map.get(c || %{}, "replacements", %{})

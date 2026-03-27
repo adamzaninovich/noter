@@ -28,8 +28,22 @@ defmodule Noter.LLM.Structured do
     case Client.chat(role, messages, opts) do
       {:ok, content} ->
         case Jason.decode(content) do
-          {:ok, parsed} -> {:ok, parsed}
-          {:error, _} -> attempt(role, messages, opts, attempts + 1)
+          {:ok, parsed} ->
+            {:ok, parsed}
+
+          {:error, _} ->
+            retry_messages =
+              messages ++
+                [
+                  %{"role" => "assistant", "content" => content},
+                  %{
+                    "role" => "user",
+                    "content" =>
+                      "That was not valid JSON. Please respond with ONLY valid JSON matching the schema, no other text."
+                  }
+                ]
+
+            attempt(role, retry_messages, opts, attempts + 1)
         end
 
       {:error, reason} ->

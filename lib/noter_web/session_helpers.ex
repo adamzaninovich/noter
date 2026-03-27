@@ -3,6 +3,8 @@ defmodule NoterWeb.SessionHelpers do
   Shared formatting and display helpers used across session and campaign LiveViews.
   """
 
+  alias Noter.Sessions.Session
+
   def format_time(seconds) when is_number(seconds) do
     total = trunc(seconds)
     h = div(total, 3600)
@@ -15,11 +17,10 @@ defmodule NoterWeb.SessionHelpers do
   def format_time(_), do: "00:00:00"
 
   def status_badge_class(status) do
-    case status do
-      "reviewed" -> "badge-success"
-      "done" -> "badge-success"
-      status when status in ~w(uploading trimming transcribing reviewing) -> "badge-info"
-      _ -> "badge-soft badge-info"
+    cond do
+      Session.finalized?(status) -> "badge-success"
+      status in ~w(uploading trimming transcribing reviewing) -> "badge-info"
+      true -> "badge-soft badge-info"
     end
   end
 end

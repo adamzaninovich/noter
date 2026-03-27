@@ -1,6 +1,7 @@
 defmodule NoterWeb.SettingsLive do
   use NoterWeb, :live_view
 
+  alias Noter.LLM.Client
   alias Noter.Settings
 
   @api_key_fields ~w(llm_extraction_api_key llm_writing_api_key)
@@ -86,39 +87,19 @@ defmodule NoterWeb.SettingsLive do
 
   def handle_event("fetch_models", %{"role" => role}, socket)
       when role in ~w(extraction writing) do
-    form = socket.assigns.form
-    prefix = "llm_#{role}"
+    role_atom = String.to_existing_atom(role)
 
-    base_url = form[String.to_existing_atom("#{prefix}_base_url")].value
-    form_key = form[String.to_existing_atom("#{prefix}_api_key")].value
+    case Client.list_models(role_atom) do
+      {:ok, ids} ->
+        models_key = String.to_existing_atom("#{role}_models")
 
-    api_key =
-      if is_binary(form_key) and form_key != "",
-        do: form_key,
-        else: Settings.get("#{prefix}_api_key")
+        {:noreply,
+         socket
+         |> assign(models_key, ids)
+         |> put_flash(:info, "Found #{length(ids)} model(s).")}
 
-    if is_nil(base_url) or base_url == "" do
-      {:noreply, put_flash(socket, :error, "Set a Base URL first.")}
-    else
-      headers = if api_key, do: [{"authorization", "Bearer #{api_key}"}], else: []
-
-      case Req.get("#{base_url}/models", headers: headers, receive_timeout: 10_000) do
-        {:ok, %{status: 200, body: %{"data" => models}}} ->
-          ids = models |> Enum.map(& &1["id"]) |> Enum.sort()
-          models_key = String.to_existing_atom("#{role}_models")
-
-          {:noreply,
-           socket
-           |> assign(models_key, ids)
-           |> put_flash(:info, "Found #{length(ids)} model(s).")}
-
-        {:ok, %{status: status, body: body}} ->
-          {:noreply,
-           put_flash(socket, :error, "Failed to fetch models (#{status}): #{inspect(body)}")}
-
-        {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Failed to fetch models: #{inspect(reason)}")}
-      end
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to fetch models: #{reason}")}
     end
   end
 
@@ -132,6 +113,55 @@ defmodule NoterWeb.SettingsLive do
   end
 
   defp parse_numeric(val), do: val
+
+  attr :models, :list, required: true
+  attr :role, :string, required: true
+  attr :field, :any, required: true
+  attr :placeholder, :string, default: "gpt-4o"
+
+  defp model_selector(assigns) do
+    assigns =
+      assigns
+      |> assign(:field_name, assigns.field.name)
+      |> assign(:field_id, assigns.field.id)
+      |> assign(:field_value, assigns.field.value)
+
+    ~H"""
+    <div class="fieldset">
+      <label class="label">Model</label>
+      <div class="join w-full">
+        <%= if @models != [] do %>
+          <select name={@field_name} id={@field_id} class="select select-bordered join-item flex-1">
+            <option value="">Select a model...</option>
+            <%= for model <- @models do %>
+              <option value={model} selected={@field_value == model}>
+                {model}
+              </option>
+            <% end %>
+          </select>
+        <% else %>
+          <input
+            type="text"
+            name={@field_name}
+            id={@field_id}
+            value={@field_value}
+            placeholder={@placeholder}
+            class="input join-item flex-1"
+          />
+        <% end %>
+        <button
+          type="button"
+          phx-click="fetch_models"
+          phx-value-role={@role}
+          phx-disable-with="Fetching..."
+          class="btn btn-soft btn-accent join-item"
+        >
+          Fetch Models
+        </button>
+      </div>
+    </div>
+    """
+  end
 
   @impl true
   def render(assigns) do
@@ -190,43 +220,11 @@ defmodule NoterWeb.SettingsLive do
               value=""
             />
 
-            <div class="fieldset">
-              <label class="label">Model</label>
-              <div class="join w-full">
-                <%= if @extraction_models != [] do %>
-                  <select
-                    name="settings[llm_extraction_model]"
-                    id="settings_llm_extraction_model"
-                    class="select select-bordered join-item flex-1"
-                  >
-                    <option value="">Select a model...</option>
-                    <%= for model <- @extraction_models do %>
-                      <option value={model} selected={@form[:llm_extraction_model].value == model}>
-                        {model}
-                      </option>
-                    <% end %>
-                  </select>
-                <% else %>
-                  <input
-                    type="text"
-                    name="settings[llm_extraction_model]"
-                    id="settings_llm_extraction_model"
-                    value={@form[:llm_extraction_model].value}
-                    placeholder="gpt-4o"
-                    class="input join-item flex-1"
-                  />
-                <% end %>
-                <button
-                  type="button"
-                  phx-click="fetch_models"
-                  phx-value-role="extraction"
-                  phx-disable-with="Fetching..."
-                  class="btn btn-soft btn-accent join-item"
-                >
-                  Fetch Models
-                </button>
-              </div>
-            </div>
+            <.model_selector
+              field={@form[:llm_extraction_model]}
+              models={@extraction_models}
+              role="extraction"
+            />
 
             <div class="flex gap-4">
               <div class="flex-1">
@@ -267,43 +265,11 @@ defmodule NoterWeb.SettingsLive do
               value=""
             />
 
-            <div class="fieldset">
-              <label class="label">Model</label>
-              <div class="join w-full">
-                <%= if @writing_models != [] do %>
-                  <select
-                    name="settings[llm_writing_model]"
-                    id="settings_llm_writing_model"
-                    class="select select-bordered join-item flex-1"
-                  >
-                    <option value="">Select a model...</option>
-                    <%= for model <- @writing_models do %>
-                      <option value={model} selected={@form[:llm_writing_model].value == model}>
-                        {model}
-                      </option>
-                    <% end %>
-                  </select>
-                <% else %>
-                  <input
-                    type="text"
-                    name="settings[llm_writing_model]"
-                    id="settings_llm_writing_model"
-                    value={@form[:llm_writing_model].value}
-                    placeholder="gpt-4o"
-                    class="input join-item flex-1"
-                  />
-                <% end %>
-                <button
-                  type="button"
-                  phx-click="fetch_models"
-                  phx-value-role="writing"
-                  phx-disable-with="Fetching..."
-                  class="btn btn-soft btn-accent join-item"
-                >
-                  Fetch Models
-                </button>
-              </div>
-            </div>
+            <.model_selector
+              field={@form[:llm_writing_model]}
+              models={@writing_models}
+              role="writing"
+            />
 
             <.input
               field={@form[:llm_writing_temperature]}

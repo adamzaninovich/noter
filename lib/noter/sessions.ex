@@ -138,7 +138,9 @@ defmodule Noter.Sessions do
 
   def update_corrections(%Session{} = session, corrections_map) do
     status =
-      if session.status in ~w(transcribed reviewed done), do: "reviewing", else: session.status
+      if session.status in ~w(transcribed) or Session.finalized?(session),
+        do: "reviewing",
+        else: session.status
 
     session
     |> Session.corrections_changeset(%{
