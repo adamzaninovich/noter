@@ -31,6 +31,7 @@ defmodule Noter.Settings do
     |> Map.new(fn setting -> {setting.key, Jason.decode!(setting.value)} end)
   end
 
+  # Only checks for nil/empty string — falsy values like false/0 are treated as configured.
   def configured?(key) do
     case get(key) do
       nil -> false
