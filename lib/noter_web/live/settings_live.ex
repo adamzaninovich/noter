@@ -23,30 +23,39 @@ defmodule NoterWeb.SettingsLive do
 
   @impl true
   def handle_event("save", %{"settings" => params}, socket) do
-    for {key, value} <- params do
-      cond do
-        key in @api_key_fields and value == "" and socket.assigns.keys_set[key] ->
-          :skip
+    result =
+      Noter.Repo.transaction(fn ->
+        for {key, value} <- params do
+          cond do
+            key in @api_key_fields and value == "" and socket.assigns.keys_set[key] ->
+              :skip
 
-        key in @numeric_fields ->
-          Settings.set(key, parse_numeric(value))
+            key in @numeric_fields ->
+              Settings.set!(key, parse_numeric(value))
 
-        true ->
-          Settings.set(key, value)
-      end
+            true ->
+              Settings.set!(key, value)
+          end
+        end
+      end)
+
+    case result do
+      {:ok, _} ->
+        settings = Settings.all()
+
+        keys_set =
+          @api_key_fields
+          |> Map.new(fn key -> {key, Settings.configured?(key)} end)
+
+        {:noreply,
+         socket
+         |> assign(:keys_set, keys_set)
+         |> assign(:form, to_form(settings, as: :settings))
+         |> put_flash(:info, "Settings saved.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to save settings.")}
     end
-
-    settings = Settings.all()
-
-    keys_set =
-      @api_key_fields
-      |> Map.new(fn key -> {key, Settings.configured?(key)} end)
-
-    {:noreply,
-     socket
-     |> assign(:keys_set, keys_set)
-     |> assign(:form, to_form(settings, as: :settings))
-     |> put_flash(:info, "Settings saved.")}
   end
 
   def handle_event("test_transcription", _params, socket) do
