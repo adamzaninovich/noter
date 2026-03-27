@@ -62,12 +62,12 @@ defmodule NoterWeb.SettingsLive do
     url = Settings.get("transcription_url")
 
     if url && url != "" do
-      case Req.get(url, receive_timeout: 5_000) do
-        {:ok, %{status: status}} when status in 200..299 ->
+      case Req.get(url <> "/health", receive_timeout: 5_000) do
+        {:ok, %{status: 200, body: %{"status" => "ok"}}} ->
           {:noreply, put_flash(socket, :info, "Connection successful!")}
 
-        {:ok, %{status: status}} ->
-          {:noreply, put_flash(socket, :error, "Server responded with status #{status}")}
+        {:ok, %{status: status, body: body}} ->
+          {:noreply, put_flash(socket, :error, "Health check failed (#{status}): #{inspect(body)}")}
 
         {:error, reason} ->
           {:noreply, put_flash(socket, :error, "Connection failed: #{inspect(reason)}")}
