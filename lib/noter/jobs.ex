@@ -170,14 +170,33 @@ defmodule Noter.Jobs do
 
     cancel_existing_transcription(session)
 
+    # Set status to transcribing immediately so it survives page refresh
+    session = Sessions.get_session!(session_id)
+    {:ok, _} = Sessions.update_session(session, %{status: "transcribing"})
+    broadcast(session_id, {:transcription_status_changed, "transcribing"})
+
     Task.Supervisor.start_child(@supervisor, fn ->
-      case Noter.Transcription.submit_job(session_id) do
+      Registry.register(@registry, {session_id, :transcription_submit}, [])
+
+      last_broadcast = :atomics.new(1, signed: true)
+      :atomics.put(last_broadcast, 1, System.monotonic_time(:millisecond))
+
+      on_progress = fn bytes_sent, total_bytes ->
+        now = System.monotonic_time(:millisecond)
+        last = :atomics.get(last_broadcast, 1)
+
+        if now - last > 250 or bytes_sent == total_bytes do
+          :atomics.put(last_broadcast, 1, now)
+          broadcast(session_id, {:upload_progress, bytes_sent, total_bytes})
+        end
+      end
+
+      case Noter.Transcription.submit_job(session_id, on_progress: on_progress) do
         {:ok, job_id} ->
           session = Sessions.get_session!(session_id)
 
           {:ok, updated} =
             Sessions.update_transcription(session, %{
-              status: "transcribing",
               transcription_job_id: job_id
             })
 
