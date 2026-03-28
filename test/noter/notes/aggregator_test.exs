@@ -24,7 +24,8 @@ defmodule Noter.Notes.AggregatorTest do
     test "returns empty arrays for all categories when input is empty" do
       result = Aggregator.aggregate([])
 
-      for key <- ~w(events locations npcs info_learned combat decisions character_moments loose_threads inventory_rewards) do
+      for key <-
+            ~w(events locations npcs info_learned combat decisions character_moments loose_threads inventory_rewards) do
         assert result[key] == [], "expected #{key} to be empty"
       end
     end
@@ -148,7 +149,8 @@ defmodule Noter.Notes.AggregatorTest do
     end
 
     test "deduplicates all text categories" do
-      for key <- ~w(info_learned combat decisions character_moments loose_threads inventory_rewards) do
+      for key <-
+            ~w(info_learned combat decisions character_moments loose_threads inventory_rewards) do
         entry = %{"text" => "Test entry"}
 
         input = [
@@ -176,7 +178,8 @@ defmodule Noter.Notes.AggregatorTest do
       input = [{0, facts()}]
       result = Aggregator.aggregate(input)
 
-      for key <- ~w(events locations npcs info_learned combat decisions character_moments loose_threads inventory_rewards) do
+      for key <-
+            ~w(events locations npcs info_learned combat decisions character_moments loose_threads inventory_rewards) do
         assert result[key] == []
       end
     end

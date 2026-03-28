@@ -6,19 +6,19 @@ defmodule Noter.Notes.PipelineTest do
   alias Noter.Settings
 
   @transcript_json Jason.encode!(%{
-    "segments" => [
-      %{
-        "start" => 0,
-        "end" => 5,
-        "speaker" => "Alice",
-        "text" => " Hello world",
-        "words" => [
-          %{"word" => " Hello", "start" => 0, "end" => 2},
-          %{"word" => " world", "start" => 2, "end" => 5}
-        ]
-      }
-    ]
-  })
+                     "segments" => [
+                       %{
+                         "start" => 0,
+                         "end" => 5,
+                         "speaker" => "Alice",
+                         "text" => " Hello world",
+                         "words" => [
+                           %{"word" => " Hello", "start" => 0, "end" => 2},
+                           %{"word" => " world", "start" => 2, "end" => 5}
+                         ]
+                       }
+                     ]
+                   })
 
   @valid_facts %{
     "range" => "00:00:00–00:00:05",
@@ -232,14 +232,31 @@ defmodule Noter.Notes.PipelineTest do
   end
 
   describe "Jobs.start_notes_generation/2" do
-    test "returns {:ok, pid} for a finalized session" do
+    test "returns {:ok, pid} and completes pipeline in background" do
       session = setup_session()
       setup_llm_settings()
+      Jobs.subscribe(session.id)
 
       plug = dual_plug(@valid_facts, @notes_markdown)
 
       assert {:ok, pid} = Jobs.start_notes_generation(session, plug: plug)
       assert is_pid(pid)
+
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5000
+
+      updated = Sessions.get_session!(session.id)
+      assert updated.notes_status == "complete"
+    end
+
+    test "returns {:error, :already_running} when notes job is in progress" do
+      session = setup_session()
+      setup_llm_settings()
+
+      # Register a fake entry so running?/2 returns true
+      Registry.register(Noter.JobRegistry, {session.id, :notes}, [])
+
+      assert {:error, :already_running} = Jobs.start_notes_generation(session)
     end
   end
 end

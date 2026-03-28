@@ -28,8 +28,7 @@ defmodule Noter.Notes.Chunker do
         {:cont, [window_start | acc]}
       end
     end)
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {window_start, idx} ->
+    |> Enum.flat_map(fn window_start ->
       window_end = window_start + window_seconds
 
       turns =
@@ -47,7 +46,6 @@ defmodule Noter.Notes.Chunker do
 
         [
           %{
-            index: idx,
             range_start: sec_to_hms(window_start),
             range_end: sec_to_hms(min(window_end, last_end)),
             text: Enum.join(lines, "\n")
@@ -55,6 +53,7 @@ defmodule Noter.Notes.Chunker do
         ]
       end
     end)
+    |> Enum.with_index(fn chunk, idx -> Map.put(chunk, :index, idx) end)
   end
 
   defp sec_to_hms(seconds) do
