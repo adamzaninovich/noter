@@ -3,6 +3,7 @@ defmodule NoterWeb.SessionLive.Show do
 
   alias Noter.Jobs
   alias Noter.Sessions
+  alias Noter.Sessions.Session
   alias Noter.Transcription
   alias Noter.Transcription.SSEClient
   alias Noter.Transcription.Transcript
@@ -16,6 +17,7 @@ defmodule NoterWeb.SessionLive.Show do
     {"uploaded", "Trim"},
     {"trimmed", "Transcribe"},
     {"transcribed", "Review"},
+    {"reviewed", "Notes"},
     {"done", "Done"}
   ]
 
@@ -302,7 +304,7 @@ defmodule NoterWeb.SessionLive.Show do
         <% end %>
 
         <%!-- Done summary skeleton --%>
-        <%= if @session.status == "done" and not @review_loaded? do %>
+        <%= if Session.finalized?(@session) and not @review_loaded? do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <div class="skeleton h-6 w-48"></div>
@@ -403,10 +405,13 @@ defmodule NoterWeb.SessionLive.Show do
             <div class="card-body">
               <div class="flex items-center justify-between">
                 <h2 class="card-title text-lg">
-                  {if(@session.status == "done", do: "Transcript", else: "Transcript Review")}
+                  {if(Session.finalized?(@session),
+                    do: "Transcript",
+                    else: "Transcript Review"
+                  )}
                 </h2>
                 <div class="flex items-center gap-2">
-                  <%= if @session.status == "done" do %>
+                  <%= if Session.finalized?(@session) do %>
                     <span class="badge badge-success gap-1">
                       <.icon name="hero-check-circle-mini" class="size-4" /> Finalized
                     </span>
@@ -423,7 +428,7 @@ defmodule NoterWeb.SessionLive.Show do
                 </div>
               </div>
               <p class="text-sm text-base-content/60 mb-2">
-                <%= if @session.status == "done" do %>
+                <%= if Session.finalized?(@session) do %>
                   Read-only view of the finalized transcript.
                 <% else %>
                   Click any word to prefill the find field. Add replacements to fix transcription errors.
@@ -433,7 +438,7 @@ defmodule NoterWeb.SessionLive.Show do
                 <%!-- Left: transcript viewer --%>
                 <div class="flex-1 min-w-0 space-y-3">
                   <div
-                    :if={@session.status != "done"}
+                    :if={not Session.finalized?(@session)}
                     id="transcript-audio"
                     phx-hook=".TranscriptAudio"
                     phx-update="ignore"
@@ -466,7 +471,7 @@ defmodule NoterWeb.SessionLive.Show do
                   id="replacements-panel"
                   phx-hook=".DownloadJson"
                 >
-                  <%= if @session.status != "done" do %>
+                  <%= if not Session.finalized?(@session) do %>
                     <.form
                       for={@replacement_form}
                       id="replacement-form"
@@ -495,12 +500,12 @@ defmodule NoterWeb.SessionLive.Show do
                   <%= if @replacements != %{} do %>
                     <div class="flex items-center justify-between shrink-0 mb-1">
                       <div class="text-xs font-semibold text-base-content/60 uppercase tracking-wide">
-                        {if(@session.status == "done",
+                        {if(Session.finalized?(@session),
                           do: "Replacements",
                           else: "Active Replacements"
                         )}
                       </div>
-                      <div :if={@session.status != "done"} class="flex gap-1">
+                      <div :if={not Session.finalized?(@session)} class="flex gap-1">
                         <button
                           type="button"
                           phx-click="export_replacements"
@@ -531,7 +536,7 @@ defmodule NoterWeb.SessionLive.Show do
                           <span class="badge badge-xs badge-ghost ml-auto">
                             {Map.get(@match_counts, find, 0)}
                           </span>
-                          <%= if @session.status != "done" do %>
+                          <%= if not Session.finalized?(@session) do %>
                             <button
                               type="button"
                               phx-click="remove_replacement"
@@ -545,7 +550,10 @@ defmodule NoterWeb.SessionLive.Show do
                       <% end %>
                     </div>
                   <% else %>
-                    <div :if={@session.status != "done"} class="flex justify-end shrink-0 mb-1">
+                    <div
+                      :if={not Session.finalized?(@session)}
+                      class="flex justify-end shrink-0 mb-1"
+                    >
                       <button
                         type="button"
                         phx-click="toggle_import"
@@ -913,7 +921,7 @@ defmodule NoterWeb.SessionLive.Show do
     """
   end
 
-  @status_order ~w(uploading uploaded trimming trimmed transcribing transcribed reviewing done)
+  @status_order ~w(uploading uploaded trimming trimmed transcribing transcribed reviewing reviewed done)
 
   defp step_complete?(current_status, step_status) do
     current_idx = Enum.find_index(@status_order, &(&1 == current_status)) || 0
@@ -977,7 +985,8 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:transcription_status, :uploading)}
   end
 
-  def handle_event("add_replacement", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+  def handle_event("add_replacement", _, %{assigns: %{session: %{status: status}}} = socket)
+      when status in ["reviewed", "done"] do
     {:noreply, socket}
   end
 
@@ -1009,7 +1018,8 @@ defmodule NoterWeb.SessionLive.Show do
     end
   end
 
-  def handle_event("remove_replacement", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+  def handle_event("remove_replacement", _, %{assigns: %{session: %{status: status}}} = socket)
+      when status in ["reviewed", "done"] do
     {:noreply, socket}
   end
 
@@ -1036,7 +1046,8 @@ defmodule NoterWeb.SessionLive.Show do
     {:noreply, assign(socket, import_open?: !socket.assigns.import_open?)}
   end
 
-  def handle_event("import_replacements", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+  def handle_event("import_replacements", _, %{assigns: %{session: %{status: status}}} = socket)
+      when status in ["reviewed", "done"] do
     {:noreply, socket}
   end
 
@@ -1078,7 +1089,8 @@ defmodule NoterWeb.SessionLive.Show do
      |> push_event("focus-replace", %{})}
   end
 
-  def handle_event("start_edit", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+  def handle_event("start_edit", _, %{assigns: %{session: %{status: status}}} = socket)
+      when status in ["reviewed", "done"] do
     {:noreply, socket}
   end
 
@@ -1132,7 +1144,8 @@ defmodule NoterWeb.SessionLive.Show do
      |> stream_insert(:turns, normal_turn)}
   end
 
-  def handle_event("save_edit", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+  def handle_event("save_edit", _, %{assigns: %{session: %{status: status}}} = socket)
+      when status in ["reviewed", "done"] do
     {:noreply, socket}
   end
 
@@ -1149,7 +1162,8 @@ defmodule NoterWeb.SessionLive.Show do
     end
   end
 
-  def handle_event("delete_turn", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+  def handle_event("delete_turn", _, %{assigns: %{session: %{status: status}}} = socket)
+      when status in ["reviewed", "done"] do
     {:noreply, socket}
   end
 
@@ -1165,7 +1179,8 @@ defmodule NoterWeb.SessionLive.Show do
     end
   end
 
-  def handle_event("remove_edit", _, %{assigns: %{session: %{status: "done"}}} = socket) do
+  def handle_event("remove_edit", _, %{assigns: %{session: %{status: status}}} = socket)
+      when status in ["reviewed", "done"] do
     {:noreply, socket}
   end
 

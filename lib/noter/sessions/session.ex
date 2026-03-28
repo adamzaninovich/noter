@@ -2,7 +2,7 @@ defmodule Noter.Sessions.Session do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @valid_statuses ~w(uploading uploaded trimming trimmed transcribing transcribed reviewing done)
+  @valid_statuses ~w(uploading uploaded trimming trimmed transcribing transcribed reviewing reviewed done)
 
   schema "sessions" do
     field :name, :string
@@ -15,6 +15,10 @@ defmodule Noter.Sessions.Session do
     field :transcript_json, :string
     field :transcript_srt, :string
     field :corrections, :map, default: %{}
+    field :context, :string
+    field :session_notes, :string
+    field :notes_status, :string
+    field :notes_error, :string
 
     belongs_to :campaign, Noter.Campaigns.Campaign
 
@@ -48,6 +52,21 @@ defmodule Noter.Sessions.Session do
     |> validate_required([:status])
     |> validate_inclusion(:status, @valid_statuses)
   end
+
+  def notes_changeset(session, attrs) do
+    session
+    |> cast(attrs, [:session_notes, :notes_status, :notes_error, :context])
+    |> then(fn changeset ->
+      if Ecto.Changeset.get_change(changeset, :notes_status) do
+        validate_inclusion(changeset, :notes_status, ~w(pending running complete error))
+      else
+        changeset
+      end
+    end)
+  end
+
+  def finalized?(%__MODULE__{status: status}), do: status in ~w(reviewed done)
+  def finalized?(status) when is_binary(status), do: status in ~w(reviewed done)
 
   def corrections(%__MODULE__{corrections: c}), do: c || %{}
   def replacements(%__MODULE__{corrections: c}), do: Map.get(c || %{}, "replacements", %{})

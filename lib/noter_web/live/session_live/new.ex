@@ -11,6 +11,7 @@ defmodule NoterWeb.SessionLive.New do
     {"uploaded", "Trim"},
     {"trimmed", "Transcribe"},
     {"transcribed", "Review"},
+    {"reviewed", "Notes"},
     {"done", "Done"}
   ]
 

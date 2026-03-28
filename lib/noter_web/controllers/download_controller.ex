@@ -9,11 +9,7 @@ defmodule NoterWeb.DownloadController do
   def download(conn, %{"session_id" => session_id}) do
     session = Sessions.get_session_with_campaign!(session_id)
 
-    if session.status != "done" do
-      conn
-      |> put_flash(:error, "Session must be finalized before downloading.")
-      |> redirect(to: ~p"/campaigns/#{session.campaign.slug}/sessions/#{session.slug}")
-    else
+    if Session.finalized?(session) do
       session_dir = Uploads.session_dir(session.id)
       root = "#{session.campaign.name} #{session.name}"
 
@@ -29,6 +25,10 @@ defmodule NoterWeb.DownloadController do
       entries
       |> Packmatic.build_stream()
       |> Packmatic.Conn.send_chunked(conn, filename)
+    else
+      conn
+      |> put_flash(:error, "Session must be finalized before downloading.")
+      |> redirect(to: ~p"/campaigns/#{session.campaign.slug}/sessions/#{session.slug}")
     end
   end
 
