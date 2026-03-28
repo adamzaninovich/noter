@@ -24,12 +24,12 @@ defmodule NoterWeb.DownloadControllerTest do
     {:ok, session} = Sessions.create_session(campaign, %{name: "Session One"})
 
     transcript = Keyword.get(opts, :transcript_json, @transcript_json)
-    status = Keyword.get(opts, :status, "reviewed")
+    status = Keyword.get(opts, :status, "done")
 
     {:ok, session} =
       session
       |> Session.transcription_changeset(%{
-        status: "transcribed",
+        status: "reviewing",
         transcript_json: transcript
       })
       |> Noter.Repo.update()
@@ -62,8 +62,8 @@ defmodule NoterWeb.DownloadControllerTest do
   end
 
   describe "download/2" do
-    test "redirects when session is not finalized", %{conn: conn} do
-      {_campaign, session} = create_session(status: "uploaded")
+    test "redirects when session is not done", %{conn: conn} do
+      {_campaign, session} = create_session(status: "reviewing")
 
       conn = get(conn, "/sessions/#{session.id}/download")
 
@@ -71,7 +71,7 @@ defmodule NoterWeb.DownloadControllerTest do
                "/campaigns/#{session.campaign.slug}/sessions/#{session.slug}"
     end
 
-    test "streams a zip with all files for a finalized session", %{conn: conn} do
+    test "streams a zip with all files for a done session", %{conn: conn} do
       {_campaign, session} = create_session()
       setup_upload_files(session)
 

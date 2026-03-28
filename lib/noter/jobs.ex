@@ -4,6 +4,8 @@ defmodule Noter.Jobs do
   so they survive LiveView disconnects. Progress is broadcast via PubSub.
   """
 
+  require Logger
+
   alias Noter.Notes.Pipeline, as: NotesPipeline
   alias Noter.{Sessions, Uploads}
 
@@ -50,6 +52,18 @@ defmodule Noter.Jobs do
         finish_trim_task(session, session_id, start_seconds, end_seconds)
 
       error ->
+        session = Sessions.get_session!(session_id)
+
+        case Sessions.update_session(session, %{status: "uploading"}) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error(
+              "Failed to revert session #{session_id} to uploading: #{inspect(reason)}"
+            )
+        end
+
         broadcast(session_id, {:trim_complete, error})
     end
   end
@@ -58,13 +72,16 @@ defmodule Noter.Jobs do
     session = Sessions.get_session!(session_id)
 
     case Sessions.update_session(session, %{
-           status: "trimmed",
+           status: "trimming",
            trim_start_seconds: start_seconds,
            trim_end_seconds: end_seconds
          }) do
       {:ok, updated} ->
         Uploads.cleanup_wav(session_id)
         broadcast(session_id, {:trim_complete, :ok, updated})
+
+        # Auto-chain: start transcription after trim completes
+        start_transcription_submit(updated)
 
       {:error, _changeset} ->
         broadcast(session_id, {:trim_complete, {:error, "Failed to update session"}})
@@ -139,7 +156,7 @@ defmodule Noter.Jobs do
   defp finish_upload_processing_task(session, campaign) do
     session = Sessions.get_session!(session.id)
 
-    case Sessions.update_session(session, %{status: "uploaded"}) do
+    case Sessions.update_session(session, %{status: "trimming"}) do
       {:ok, updated} ->
         broadcast_upload(campaign.id, {:upload_processed, {:ok, updated}})
 
@@ -153,14 +170,33 @@ defmodule Noter.Jobs do
 
     cancel_existing_transcription(session)
 
+    # Set status to transcribing immediately so it survives page refresh
+    session = Sessions.get_session!(session_id)
+    {:ok, _} = Sessions.update_session(session, %{status: "transcribing"})
+    broadcast(session_id, {:transcription_status_changed, "transcribing"})
+
     Task.Supervisor.start_child(@supervisor, fn ->
-      case Noter.Transcription.submit_job(session_id) do
+      Registry.register(@registry, {session_id, :transcription_submit}, [])
+
+      last_broadcast = :atomics.new(1, signed: true)
+      :atomics.put(last_broadcast, 1, System.monotonic_time(:millisecond))
+
+      on_progress = fn bytes_sent, total_bytes ->
+        now = System.monotonic_time(:millisecond)
+        last = :atomics.get(last_broadcast, 1)
+
+        if now - last > 250 or bytes_sent == total_bytes do
+          :atomics.put(last_broadcast, 1, now)
+          broadcast(session_id, {:upload_progress, bytes_sent, total_bytes})
+        end
+      end
+
+      case Noter.Transcription.submit_job(session_id, on_progress: on_progress) do
         {:ok, job_id} ->
           session = Sessions.get_session!(session_id)
 
           {:ok, updated} =
             Sessions.update_transcription(session, %{
-              status: "transcribing",
               transcription_job_id: job_id
             })
 
@@ -173,6 +209,16 @@ defmodule Noter.Jobs do
           broadcast(session_id, {:transcription_submitted, job_id})
 
         {:error, reason} ->
+          session = Sessions.get_session!(session_id)
+
+          case Sessions.update_session(session, %{status: "trimming"}) do
+            {:ok, _} ->
+              :ok
+
+            {:error, err} ->
+              Logger.error("Failed to revert session #{session_id} to trimming: #{inspect(err)}")
+          end
+
           broadcast(session_id, {:transcription_submit_failed, reason})
       end
     end)

@@ -5,38 +5,50 @@ defmodule Noter.Transcription do
 
   alias Noter.Uploads
 
-  def submit_job(session_id) do
+  def submit_job(session_id, opts \\ []) do
+    on_progress = Keyword.get(opts, :on_progress, fn _bytes_sent, _total_bytes -> :ok end)
+
     with {:ok, base} <- base_url() do
       trimmed_dir = Path.join(Uploads.session_dir(session_id), "trimmed")
       vocab_path = Path.join(Uploads.session_dir(session_id), "vocab.txt")
 
-      files =
+      flac_files =
         trimmed_dir
         |> File.ls!()
         |> Enum.filter(&String.ends_with?(&1, ".flac"))
         |> Enum.sort()
         |> Enum.map(fn name ->
           path = Path.join(trimmed_dir, name)
-
-          {"files[]",
-           {File.stream!(path, 256_000),
-            filename: name, content_type: "audio/flac", size: File.stat!(path).size}}
+          {name, path, File.stat!(path).size, "audio/flac"}
         end)
 
-      files =
+      vocab_files =
         if File.exists?(vocab_path) do
-          files ++
-            [
-              {"files[]",
-               {File.stream!(vocab_path), filename: "vocab.txt", content_type: "text/plain"}}
-            ]
+          [{Path.basename(vocab_path), vocab_path, File.stat!(vocab_path).size, "text/plain"}]
         else
-          files
+          []
         end
+
+      all_files = flac_files ++ vocab_files
+      total_bytes = Enum.reduce(all_files, 0, fn {_, _, size, _}, acc -> acc + size end)
+      counter = :counters.new(1, [:atomics])
+
+      fields =
+        Enum.map(all_files, fn {name, path, size, content_type} ->
+          stream =
+            File.stream!(path, 256_000)
+            |> Stream.each(fn chunk ->
+              chunk_size = IO.iodata_length(chunk)
+              :counters.add(counter, 1, chunk_size)
+              on_progress.(:counters.get(counter, 1), total_bytes)
+            end)
+
+          {"files[]", {stream, filename: name, content_type: content_type, size: size}}
+        end)
 
       url = base <> "/jobs"
 
-      case Req.post(url, form_multipart: files, receive_timeout: 600_000) do
+      case Req.post(url, form_multipart: fields, receive_timeout: 600_000) do
         {:ok, %{status: status, body: %{"job_id" => job_id}}} when status in 200..299 ->
           {:ok, job_id}
 

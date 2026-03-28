@@ -194,7 +194,7 @@ defmodule Noter.Transcription.SSEClient do
     Sessions.update_transcription(
       Sessions.get_session!(state.session_id),
       %{
-        status: "transcribed",
+        status: "reviewing",
         transcript_json: encode_if_map(result)
       }
     )
@@ -209,7 +209,7 @@ defmodule Noter.Transcription.SSEClient do
 
     Sessions.update_transcription(
       Sessions.get_session!(state.session_id),
-      %{status: "trimmed"}
+      %{status: "trimming"}
     )
 
     broadcast(state.session_id, :error, %{error: error})
@@ -219,7 +219,7 @@ defmodule Noter.Transcription.SSEClient do
   defp dispatch_event("cancelled", _data, state) do
     Sessions.update_transcription(
       Sessions.get_session!(state.session_id),
-      %{status: "trimmed"}
+      %{status: "trimming"}
     )
 
     broadcast(state.session_id, :cancelled, %{})
