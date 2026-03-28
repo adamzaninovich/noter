@@ -248,7 +248,7 @@ Port directly from the n8n workflow nodes:
 4. "Fetch Models" button for LLM endpoints on settings page — calls `GET /v1/models` on the configured base URL, validates connectivity, and populates the model field as a dropdown with the returned model list
 5. Tests: client with Req test adapter/plug, structured output parsing
 
-### Phase 3: Notes Pipeline (Backend)
+### Phase 3: Notes Pipeline (Backend) DONE
 
 **Goal**: Full pipeline that takes a session and produces markdown notes
 
@@ -327,8 +327,10 @@ No new Hex packages needed:
 3. **Status flow change**: "done" moves to the very end (after notes generation). New status `reviewed` inserted for "transcript finalized, SRT generated." Full flow becomes:
 
 ```
-uploading → uploaded → trimming → trimmed → transcribing → transcribed → reviewing → reviewed → done
+uploading → uploaded → trimming → trimmed → transcribing → transcribed → reviewing → reviewed → <writing notes status> → done
 ```
+
+we need a new status for when its actively writing notes between transcribed and done. not sure what to call that.
 
 - `reviewed` = transcript corrections locked, SRT generated (what "done" means today)
 - `done` = notes generated, full pipeline complete
