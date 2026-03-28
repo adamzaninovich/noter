@@ -4,6 +4,8 @@ defmodule Noter.Jobs do
   so they survive LiveView disconnects. Progress is broadcast via PubSub.
   """
 
+  require Logger
+
   alias Noter.Notes.Pipeline, as: NotesPipeline
   alias Noter.{Sessions, Uploads}
 
@@ -50,9 +52,18 @@ defmodule Noter.Jobs do
         finish_trim_task(session, session_id, start_seconds, end_seconds)
 
       error ->
-        # Revert status from trimming to uploading on failure
         session = Sessions.get_session!(session_id)
-        Sessions.update_session(session, %{status: "uploading"})
+
+        case Sessions.update_session(session, %{status: "uploading"}) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error(
+              "Failed to revert session #{session_id} to uploading: #{inspect(reason)}"
+            )
+        end
+
         broadcast(session_id, {:trim_complete, error})
     end
   end
@@ -179,9 +190,16 @@ defmodule Noter.Jobs do
           broadcast(session_id, {:transcription_submitted, job_id})
 
         {:error, reason} ->
-          # Revert to trimming on submit failure
           session = Sessions.get_session!(session_id)
-          Sessions.update_session(session, %{status: "trimming"})
+
+          case Sessions.update_session(session, %{status: "trimming"}) do
+            {:ok, _} ->
+              :ok
+
+            {:error, err} ->
+              Logger.error("Failed to revert session #{session_id} to trimming: #{inspect(err)}")
+          end
+
           broadcast(session_id, {:transcription_submit_failed, reason})
       end
     end)

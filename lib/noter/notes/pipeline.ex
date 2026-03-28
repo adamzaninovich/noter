@@ -4,6 +4,8 @@ defmodule Noter.Notes.Pipeline do
   Runs as a background job via `Noter.Jobs`.
   """
 
+  require Logger
+
   alias Noter.Notes.{Aggregator, Chunker, Extractor, Writer}
   alias Noter.Sessions
   alias Noter.Sessions.Session
@@ -85,21 +87,7 @@ defmodule Noter.Notes.Pipeline do
     case extraction_result do
       {:ok, chunk_facts_rev, _} ->
         aggregated = chunk_facts_rev |> Enum.reverse() |> Aggregator.aggregate()
-
-        case Writer.write(aggregated, context, opts) do
-          {:ok, markdown} ->
-            Sessions.update_session_notes(session, %{
-              status: "done",
-              session_notes: markdown
-            })
-
-            broadcast(session_id, {:notes_progress, %{stage: :complete}})
-            :ok
-
-          {:error, reason} ->
-            handle_failure(session_id, reason)
-            {:error, reason}
-        end
+        write_and_persist(session, aggregated, context, opts)
 
       {:error, reason} ->
         handle_failure(session_id, reason)
@@ -107,13 +95,36 @@ defmodule Noter.Notes.Pipeline do
     end
   end
 
+  defp write_and_persist(session, aggregated, context, opts) do
+    case Writer.write(aggregated, context, opts) do
+      {:ok, markdown} ->
+        case Sessions.update_session_notes(session, %{status: "done", session_notes: markdown}) do
+          {:ok, _} ->
+            broadcast(session.id, {:notes_progress, %{stage: :complete}})
+            :ok
+
+          {:error, err} ->
+            reason = "Failed to save notes: #{inspect(err)}"
+            handle_failure(session.id, reason)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        handle_failure(session.id, reason)
+        {:error, reason}
+    end
+  end
+
   defp handle_failure(session_id, reason) do
     session = Sessions.get_session!(session_id)
 
-    Sessions.update_session_notes(session, %{
-      status: "reviewing",
-      notes_error: reason
-    })
+    case Sessions.update_session_notes(session, %{status: "reviewing", notes_error: reason}) do
+      {:ok, _} ->
+        :ok
+
+      {:error, err} ->
+        Logger.error("Failed to revert session #{session_id} to reviewing: #{inspect(err)}")
+    end
 
     broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
   end

@@ -208,9 +208,9 @@ defmodule Noter.Sessions do
     |> Session.notes_changeset(%{
       status: "reviewing",
       session_notes: nil,
-      notes_error: nil
+      notes_error: nil,
+      transcript_srt: nil
     })
-    |> Ecto.Changeset.put_change(:transcript_srt, nil)
     |> Repo.update()
     |> broadcast_session_update()
   end

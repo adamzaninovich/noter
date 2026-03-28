@@ -54,7 +54,7 @@ defmodule Noter.Sessions.Session do
 
   def notes_changeset(session, attrs) do
     session
-    |> cast(attrs, [:session_notes, :notes_error, :context, :status])
+    |> cast(attrs, [:session_notes, :notes_error, :context, :status, :transcript_srt])
     |> validate_inclusion(:status, @valid_statuses)
   end
 
