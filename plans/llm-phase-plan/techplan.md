@@ -71,11 +71,12 @@ Add fields for notes generation and campaign context:
 ```
 alter table sessions add column context text             -- campaign context document (markdown) for this session
 alter table sessions add column session_notes text       -- generated markdown output
-alter table sessions add column notes_status text        -- null | generating | done | error
 alter table sessions add column notes_error text         -- error message if generation failed
 ```
 
-The `context` field holds the campaign world document for this specific session. It changes between sessions as the campaign progresses. Not required to create a session — can be added/edited at any time before generating notes. In the future, the app will auto-generate an updated context from the previous session's context + notes, but for now it's manually pasted in.
+No `notes_status` column — session `status` is the single source of truth (`noting` = generating, `done` = complete, revert to `reviewing` = failed). See the [State Machine Spec](State%20Machine%20Spec.md) for details.
+
+The `context` field holds the campaign world document for this specific session. It changes between sessions as the campaign progresses. Not required to create a session — can be added/edited during the `reviewing` status before the user finalizes. In the future, the app will auto-generate an updated context from the previous session's context + notes, but for now it's manually pasted in.
 
 ## Architecture
 
@@ -133,7 +134,7 @@ Noter.Notes
 ### Pipeline Flow
 
 ```
-Session (status: "reviewed" → "noting")
+Session (status: "reviewing" → "noting", triggered by Finalize)
   │
   ├─ 1. Transcript.apply_corrections(raw_turns, replacements, edits)
   │     → [{speaker, start, end, text}, ...]
@@ -160,7 +161,8 @@ Session (status: "reviewed" → "noting")
   │     Single LLM call with :writing model settings
   │     → markdown string
   │
-  └─ 6. Store session_notes, set notes_status = "done"
+  └─ 6. Store session_notes, set status = "done"
+       On failure: revert status to "reviewing", store error in notes_error
 ```
 
 ### Background Job Integration
@@ -270,26 +272,154 @@ Port directly from the n8n workflow nodes:
    - `clear_notes/1` — reset for re-generation
 8. Tests: chunker, aggregator (pure code), pipeline integration
 
-### Phase 4: UI — Campaign Context + Notes Generation
+### Phase 4: State Machine Refactor DONE
 
-**Goal**: Session context editing + notes generation trigger + progress + display + status flow update
+**Goal**: Align the codebase with the [State Machine Spec](../State%20Machine%20Spec.md). This is a prerequisite for the UI phase — the spec simplifies the status model, removes shadow state, and introduces auto-chaining that the UI depends on.
 
-1. **Add `noting` status** to the session status flow
-   - Add `"noting"` to `@valid_statuses` in `Session` schema
-   - Pipeline sets `status: "noting"` when it begins (alongside `notes_status: "running"`)
-   - On success: `status: "done"`; on error: revert to `status: "reviewed"`
-   - Update `finalized?/1` to include `"noting"` (session is still finalized while notes generate)
-2. **Session context editor** (on session show page)
+**Source of truth**: `plans/State Machine Spec.md`. If anything here contradicts the spec, the spec wins.
+
+1. **Remove intermediate statuses**
+   - Remove `uploaded`, `trimmed`, `transcribed`, `reviewed` from `@valid_statuses` in the `Session` schema
+   - The full status list becomes: `uploading`, `trimming`, `transcribing`, `reviewing`, `noting`, `done`
+   - Update all status checks, pattern matches, and conditionals throughout the codebase
+2. **Data migration**
+   - Map existing sessions: `uploaded` → `trimming`, `trimmed` → `trimming`, `transcribed` → `reviewing`, `reviewed` → `reviewing`
+   - Generate a proper Ecto migration for this
+3. **Remove `notes_status` column**
+   - Drop the `notes_status` column from the sessions table (migration)
+   - Remove it from the `Session` schema and all code that reads/writes it
+   - Session `status` is now the single source of truth: `noting` = generating, `done` = complete, revert to `reviewing` = failed
+4. **Remove `finalized?/1` predicate**
+   - Delete the function
+   - Replace all call sites with direct status checks (e.g. `session.status in ~w(noting done)`)
+5. **Replace `unfinalize/1` with `edit_session/1`**
+   - New function for the `done → reviewing` backward transition
+   - Guards that session is in `done` status, returns error otherwise
+   - Clears `session_notes`, `notes_error`, and `transcript_srt`
+6. **Auto-chain forward transitions**
+   - Trim completion auto-starts transcription (no intermediate `trimmed` pause)
+   - Finalize auto-starts notes generation (no manual "Generate Notes" step)
+   - Remove any UI buttons or code paths for manually triggering these chained steps
+7. **Guard source status on all transitions**
+   - Every transition function validates the session is in the expected source status
+   - Return `{:error, :invalid_status}` (or similar) if the guard fails
+8. **Fix `update_corrections` backdoor**
+   - The function should only update corrections data, not change status as a side effect
+   - Corrections should only be editable when status is `reviewing`
+9. **Fix trim failure: no status revert**
+   - When `Uploads.trim_session` fails, revert status from `trimming` to `uploading`
+   - Currently the error is broadcast but the session gets stuck in `trimming`
+10. **Fix `Settings.get/2` falsy values**
+    - `Jason.decode!(setting.value) || default` treats `false`, `0`, `0.0` as missing
+    - Should only fall back to default for `nil`
+11. **Tests**
+    - Status transition tests: valid forward transitions, valid backward transition (`done → reviewing`), invalid transitions rejected
+    - Error revert tests: trim failure → `uploading`, transcription failure → `trimming`, notes failure → `reviewing`
+    - Auto-chain tests: trim complete triggers transcription, finalize triggers notes
+    - Guard tests: transitions from wrong source status return errors
+    - `edit_session/1` clears the correct fields
+
+### Phase 5: Notes GenServer (Backend)
+
+**Goal**: Replace the fire-and-forget `Task` pipeline execution with a dynamically supervised GenServer that tracks pipeline stage and progress, enabling reconnect-safe progress queries from the UI.
+
+Follows the same pattern as `Transcription.SSEClient`.
+
+#### Process design
+
+- `Noter.Notes.Server` — `use GenServer, restart: :temporary`
+- Started under a `DynamicSupervisor` (e.g. `Noter.NotesSupervisor`)
+- Registered via `Registry` (e.g. `Noter.NotesRegistry`) keyed by `session_id`
+- `start_link/1` takes `session_id`, registered as `{:via, Registry, {Noter.NotesRegistry, session_id}}`
+- `running?/1` and `get_progress/1` class functions for LiveView reconnect (same pattern as `SSEClient.running?/1` and `SSEClient.get_progress/1`)
+
+#### State and stages
+
+The GenServer tracks which stage of the pipeline is active and progress within that stage:
+
+```elixir
+defstruct [
+  :session_id,
+  :task_ref,
+  stage: :starting,        # :starting | :extracting | :aggregating | :writing | :complete | :error
+  chunks_completed: 0,
+  chunks_total: 0,
+  error: nil
+]
+```
+
+#### Pipeline execution
+
+- On `init`, immediately `{:continue, :run}` to start the pipeline
+- Each pipeline step updates the GenServer state and broadcasts progress via PubSub on `"notes:#{session_id}"`
+- Extraction runs in a spawned `Task` (linked or async) so the GenServer can update state as chunks complete — the existing `Task.async_stream` approach works, but results are sent back to the GenServer as messages rather than being consumed inline
+- On completion: persist notes, update session status to `done`, broadcast `:complete`, stop
+- On error: persist error, revert session status to `reviewing`, broadcast `:error`, stop
+
+#### Progress broadcasts (on `"notes:#{session_id}"`)
+
+- `{:notes, :extracting, %{completed: 3, total: 12}}` — chunk extraction progress
+- `{:notes, :aggregating, %{}}` — aggregation step (fast, no sub-progress)
+- `{:notes, :writing, %{}}` — writing step (single LLM call, no sub-progress)
+- `{:notes, :complete, %{}}` — done
+- `{:notes, :error, %{error: reason}}` — failed
+
+#### `get_progress/1` return value (for reconnect)
+
+```elixir
+%{
+  stage: :extracting,
+  chunks_completed: 3,
+  chunks_total: 12
+}
+```
+
+#### Integration
+
+1. Add `Noter.NotesRegistry` and `Noter.NotesSupervisor` to the application supervision tree
+2. Replace `Jobs.start_notes_generation/2` — instead of `Task.Supervisor.start_child`, start a `Notes.Server` under the `DynamicSupervisor`
+3. Refactor `Noter.Notes.Pipeline.run/2` so the GenServer can drive it step-by-step (or call into it), updating its own state between steps. The pipeline logic itself (chunking, extraction, aggregation, writing) stays in `Pipeline` — the GenServer orchestrates and tracks progress
+4. Remove the old `Task`-based notes job registration from `JobRegistry`
+
+#### Tests
+
+- GenServer starts, runs pipeline, reaches `:complete` stage, stops
+- `get_progress/1` returns current stage and chunk counts mid-run
+- `running?/1` returns true while running, false after completion
+- Error handling: pipeline failure → stage becomes `:error`, session reverts to `reviewing`, GenServer stops
+- Duplicate start rejected when already running for a session
+
+### Phase 6: UI — Campaign Context + Notes Display
+
+**Goal**: Session context editing, notes progress display, rendered notes, download — wired to the simplified state machine from phase 4 and the Notes GenServer from phase 5.
+
+All UI state derives from `session.status`. No `noting?` assign, no `notes_state/2` helper — remove these if they exist in the LiveView.
+
+1. **Session context editor** (on session show page, visible during `reviewing`)
    - Textarea for editing the session's campaign context markdown document
-   - Can be added/updated at any time before or after transcript finalization
+   - Saved to `session.context` via a `phx-submit` or `phx-blur` event
+   - Available during `reviewing` status only — once the user clicks Finalize, notes start immediately and the context is locked
    - In the future, auto-populated from previous session's context + notes
-3. **Session show page — notes step** (visible when status is `reviewed`, `noting`, or `done`)
-   - "Generate Notes" button (when `reviewed`) → kicks off pipeline, status becomes `noting`
-   - Progress indicator during generation (chunk X of Y extracting, then writing)
-   - Display generated markdown (rendered) when `done`
-   - "Regenerate" button to re-run from `done`
-   - Error display with retry
-4. **Update download ZIP structure** — download available from `reviewed`, `noting`, or `done`. The ZIP should have this structure:
+2. **Finalize action**
+   - Existing "Finalize" button in the `reviewing` state triggers finalization
+   - Finalization auto-starts notes generation (per phase 4 auto-chaining) — there is no separate "Generate Notes" button
+   - Status goes `reviewing → noting` automatically
+   - LiveView subscribes to `"notes:#{session.id}"` and assigns `:notes_progress`
+3. **Notes progress display** (visible when status is `noting`)
+   - Subscribe to PubSub broadcasts on `"notes:#{session.id}"`
+   - On mount/reconnect: if status is `noting`, call `Notes.Server.get_progress/1` to recover current state (same pattern as `reconnect_transcription`)
+   - **Stage display**: show current stage label — "Extracting facts...", "Aggregating...", "Writing notes..."
+   - **Progress bar**: during `:extracting` stage, show a progress bar (`chunks_completed / chunks_total`). Other stages show an indeterminate/spinner state since they're single operations
+   - Assign `:notes_progress` in the LiveView, updated by `handle_info` for each broadcast
+4. **Rendered notes display** (visible when status is `done`)
+   - Render `session.session_notes` markdown as HTML
+   - "Edit Session" button → calls `edit_session/1` → status reverts to `reviewing`
+   - From `reviewing`, user can edit corrections/context and finalize again to regenerate
+5. **Error handling** (when notes fail, status reverts to `reviewing`)
+   - Display `session.notes_error` as a flash or inline error message
+   - User can edit context/corrections and click Finalize again to retry
+   - No separate "Retry" button — the flow is: see error → optionally adjust → Finalize
+6. **Update download ZIP** — download available from `done` status only
    ```
    {Campaign} {Session}/
    ├── campaign-context.md          -- session.context (if present)
@@ -305,12 +435,16 @@ Port directly from the n8n workflow nodes:
    └── vocab.txt
    ```
    Update `DownloadController` to:
-   - Allow download from `reviewed` or later (not just `done`)
+   - Only allow download from `done` status
    - Add `campaign-context.md` entry from `session.context`
    - Add `{session-slug}-notes.md` entry from `session.session_notes`
    - Both new files are optional — only included when present
+7. **Clean up LiveView state**
+   - Remove `noting?` assign if it exists
+   - Remove `notes_state/2` helper if it exists
+   - All status-dependent UI logic derives from `session.status` directly
 
-### Phase 5: Context Auto-Update (Future/Optional)
+### Phase 7: Context Auto-Update (Future/Optional)
 
 **Goal**: After generating session notes, auto-generate the next session's context document
 
@@ -328,15 +462,16 @@ No new Hex packages needed:
 ## Resolved Questions
 
 1. **Chunk size**: Fixed at 10 minutes. Working well in the current pipeline.
-2. **Re-generation**: Overwrite previous notes. Transcript + context are the source of truth.
-3. **Status flow change**: "done" moves to the very end (after notes generation). New status `reviewed` inserted for "transcript finalized, SRT generated." Full flow:
+2. **Re-generation**: No dedicated regenerate button. To regenerate notes, the user clicks "Edit Session" (`done → reviewing`), optionally adjusts context/corrections, then clicks Finalize again. This re-runs the full pipeline.
+3. **Status flow**: Simplified per the State Machine Spec:
 
 ```
-uploading → uploaded → trimming → trimmed → transcribing → transcribed → reviewing → reviewed → noting → done
+uploading → trimming → transcribing → reviewing → noting → done
 ```
 
-- `reviewed` = transcript corrections locked, SRT generated (what "done" means today)
+- `reviewing` = user edits corrections and context, clicks Finalize to proceed
 - `noting` = notes pipeline is actively running (extraction + writing)
-- `done` = notes generated, full pipeline complete
-- Notes generation available from `reviewed` status
-- Download available from `reviewed` or later (includes notes in ZIP when present)
+- `done` = notes generated, full pipeline complete, download available
+- Only one backward transition: `done → reviewing` ("Edit Session"), which clears notes and SRT
+- Failed jobs revert to the previous status (e.g. `noting → reviewing`)
+- No shadow state machines — `session.status` is the single source of truth
