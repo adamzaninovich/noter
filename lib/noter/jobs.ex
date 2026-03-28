@@ -4,6 +4,7 @@ defmodule Noter.Jobs do
   so they survive LiveView disconnects. Progress is broadcast via PubSub.
   """
 
+  alias Noter.Notes.Pipeline, as: NotesPipeline
   alias Noter.{Sessions, Uploads}
 
   @registry Noter.JobRegistry
@@ -206,5 +207,21 @@ defmodule Noter.Jobs do
 
   def subscribe_uploads(campaign_id) do
     Phoenix.PubSub.subscribe(@pubsub, upload_topic(campaign_id))
+  end
+
+  def start_notes_generation(session, opts \\ []) do
+    session_id = session.id
+
+    if running?(session_id, :notes) do
+      {:error, :already_running}
+    else
+      {:ok, pid} =
+        Task.Supervisor.start_child(@supervisor, fn ->
+          Registry.register(@registry, {session_id, :notes}, [])
+          NotesPipeline.run(session_id, opts)
+        end)
+
+      {:ok, pid}
+    end
   end
 end
