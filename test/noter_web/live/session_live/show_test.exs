@@ -12,7 +12,7 @@ defmodule NoterWeb.SessionLive.ShowTest do
       Campaigns.create_campaign(%{name: "Test Campaign", player_map: %{"user1" => "Thorin"}})
 
     {:ok, session} = Sessions.create_session(campaign, %{name: "Session 1"})
-    {:ok, _} = Sessions.update_session(session, %{status: "uploaded"})
+    {:ok, _} = Sessions.update_session(session, %{status: "trimming"})
     session = Sessions.get_session!(session.id)
 
     on_exit(fn -> File.rm_rf(Uploads.session_dir(session.id)) end)
@@ -24,7 +24,7 @@ defmodule NoterWeb.SessionLive.ShowTest do
     {:ok, view, _html} = live(conn, ~p"/campaigns/#{campaign.slug}/sessions/#{session.slug}")
 
     assert has_element?(view, "h1", session.name)
-    assert has_element?(view, ".badge", "uploaded")
+    assert has_element?(view, ".badge", "trimming")
   end
 
   test "renders step indicator", %{conn: conn, campaign: campaign, session: session} do

@@ -8,10 +8,10 @@ defmodule NoterWeb.SessionLive.New do
 
   @steps [
     {"uploading", "Upload"},
-    {"uploaded", "Trim"},
-    {"trimmed", "Transcribe"},
-    {"transcribed", "Review"},
-    {"reviewed", "Notes"},
+    {"trimming", "Trim"},
+    {"transcribing", "Transcribe"},
+    {"reviewing", "Review"},
+    {"noting", "Notes"},
     {"done", "Done"}
   ]
 

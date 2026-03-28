@@ -17,7 +17,7 @@ defmodule NoterWeb.SessionLive.ReviewState do
   @speaker_palette ~w(badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error)
 
   def assign_review_state_defaults(socket, session) do
-    reviewing? = session.status in ~w(transcribed reviewing) or Session.finalized?(session)
+    reviewing? = session.status in ~w(reviewing noting done)
 
     socket
     |> assign(:reviewing?, reviewing?)
@@ -39,7 +39,7 @@ defmodule NoterWeb.SessionLive.ReviewState do
   end
 
   def assign_review_state(socket, session) do
-    if session.status in ~w(transcribed reviewing) or Session.finalized?(session) do
+    if session.status in ~w(reviewing noting done) do
       raw_turns = Transcript.parse_turns(session.transcript_json)
       replacements = Session.replacements(session)
       compiled_patterns = Transcript.compile_patterns(replacements)
@@ -57,7 +57,7 @@ defmodule NoterWeb.SessionLive.ReviewState do
       speaker_colors = build_speaker_colors(speakers, socket.assigns.campaign)
 
       done_stats =
-        if Session.finalized?(session) do
+        if session.status in ~w(noting done) do
           compute_done_stats(session, raw_turns, replacements, edits)
         else
           nil
@@ -77,7 +77,7 @@ defmodule NoterWeb.SessionLive.ReviewState do
       |> assign(:replacement_form, to_form(%{"find" => "", "replace" => ""}, as: :replacement))
       |> assign(:trimmed_audio_url, ~p"/sessions/#{session.id}/audio/trimmed")
       |> assign(:done_stats, done_stats)
-      |> assign(:read_only?, Session.finalized?(session))
+      |> assign(:read_only?, session.status in ~w(noting done))
       |> assign(:import_open?, false)
       |> stream(:turns, display_turns, reset: true)
     else

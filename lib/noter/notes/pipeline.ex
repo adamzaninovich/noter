@@ -14,42 +14,31 @@ defmodule Noter.Notes.Pipeline do
 
   @doc """
   Runs the full pipeline for the given session_id.
-  Steps:
-  1. Validate session is finalized
-  2. Set notes_status to "running"
-  3. Parse + apply corrections + chunk the transcript
-  4. Extract facts per chunk in parallel
-  5. Aggregate facts
-  6. Write markdown notes
-  7. Persist result and broadcast completion
+  Session must be in `noting` status (set by finalize).
   """
   def run(session_id, opts \\ []) do
     do_run(session_id, opts)
   rescue
     e ->
       reason = Exception.message(e)
-      session = Sessions.get_session!(session_id)
-      Sessions.update_session_notes(session, %{notes_status: "error", notes_error: reason})
-      broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
+      handle_failure(session_id, reason)
       {:error, reason}
   end
 
   defp do_run(session_id, opts) do
     session = Sessions.get_session!(session_id)
 
-    if Session.finalized?(session) do
+    if session.status == "noting" do
       run_pipeline(session, opts)
     else
-      reason = "Session is not finalized"
-      Sessions.update_session_notes(session, %{notes_status: "error", notes_error: reason})
-      broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
+      reason = "Session is not in noting status"
+      handle_failure(session_id, reason)
       {:error, reason}
     end
   end
 
   defp run_pipeline(session, opts) do
     session_id = session.id
-    Sessions.update_session_notes(session, %{notes_status: "running", notes_error: nil})
 
     raw_turns = Transcript.parse_turns(session.transcript_json)
 
@@ -99,27 +88,34 @@ defmodule Noter.Notes.Pipeline do
 
         case Writer.write(aggregated, context, opts) do
           {:ok, markdown} ->
-            {:ok, updated} =
-              Sessions.update_session_notes(session, %{
-                notes_status: "complete",
-                session_notes: markdown
-              })
+            Sessions.update_session_notes(session, %{
+              status: "done",
+              session_notes: markdown
+            })
 
-            {:ok, _} = Sessions.update_session(updated, %{status: "done"})
             broadcast(session_id, {:notes_progress, %{stage: :complete}})
             :ok
 
           {:error, reason} ->
-            Sessions.update_session_notes(session, %{notes_status: "error", notes_error: reason})
-            broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
+            handle_failure(session_id, reason)
             {:error, reason}
         end
 
       {:error, reason} ->
-        Sessions.update_session_notes(session, %{notes_status: "error", notes_error: reason})
-        broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
+        handle_failure(session_id, reason)
         {:error, reason}
     end
+  end
+
+  defp handle_failure(session_id, reason) do
+    session = Sessions.get_session!(session_id)
+
+    Sessions.update_session_notes(session, %{
+      status: "reviewing",
+      notes_error: reason
+    })
+
+    broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
   end
 
   defp broadcast(session_id, message) do
