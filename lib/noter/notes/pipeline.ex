@@ -105,7 +105,7 @@ defmodule Noter.Notes.Pipeline do
                 session_notes: markdown
               })
 
-            Sessions.update_session(updated, %{status: "done"})
+            {:ok, _} = Sessions.update_session(updated, %{status: "done"})
             broadcast(session_id, {:notes_progress, %{stage: :complete}})
             :ok
 

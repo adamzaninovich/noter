@@ -112,7 +112,7 @@ defmodule Noter.Notes.Aggregator do
     |> Enum.reverse()
     |> Enum.map(fn key ->
       entry = map[key]
-      %{"name" => entry.name, "notes" => entry.notes}
+      %{"name" => entry.name, "notes" => Enum.join(entry.notes, "; ")}
     end)
   end
 

@@ -6,7 +6,7 @@ defmodule Noter.Notes.WriterTest do
 
   @aggregated_facts %{
     "events" => [%{"text" => "The party explored the dungeon"}],
-    "locations" => [%{"name" => "Dungeon", "notes" => ["Dark"]}],
+    "locations" => [%{"name" => "Dungeon", "notes" => "Dark"}],
     "npcs" => [],
     "info_learned" => [],
     "combat" => [],

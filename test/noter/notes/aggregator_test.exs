@@ -78,8 +78,8 @@ defmodule Noter.Notes.AggregatorTest do
       assert length(result["npcs"]) == 1
       [npc] = result["npcs"]
       assert npc["name"] == "Bob"
-      assert "A fighter" in npc["notes"]
-      assert "Wears armor" in npc["notes"]
+      assert npc["notes"] =~ "A fighter"
+      assert npc["notes"] =~ "Wears armor"
     end
 
     test "keeps first name casing for named entities" do
@@ -101,7 +101,7 @@ defmodule Noter.Notes.AggregatorTest do
 
       result = Aggregator.aggregate(input)
       [npc] = result["npcs"]
-      assert length(npc["notes"]) == 1
+      refute npc["notes"] =~ ";"
     end
 
     test "cross-category dedup: removes decisions that match events" do
