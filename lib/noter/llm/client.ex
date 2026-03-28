@@ -52,18 +52,12 @@ defmodule Noter.LLM.Client do
   end
 
   def list_models(role, opts \\ []) when role in [:extraction, :writing] do
-    prefix = "llm_#{role}"
-    base_url = Settings.get("#{prefix}_base_url")
-    api_key = Settings.get("#{prefix}_api_key")
-
-    if is_nil(base_url) or base_url == "" do
-      {:error, "#{prefix}_base_url is not configured"}
-    else
+    with {:ok, config} <- load_config(role) do
       req_opts =
         [
-          url: "#{base_url}/models",
+          url: "#{config.base_url}/models",
           method: :get,
-          headers: auth_headers(api_key),
+          headers: auth_headers(config.api_key),
           receive_timeout: 10_000,
           retry: false
         ]

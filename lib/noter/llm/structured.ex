@@ -54,7 +54,7 @@ defmodule Noter.LLM.Structured do
   defp append_schema_instruction(messages, instruction) do
     case messages do
       [%{role: "system", content: system_content} | rest] ->
-        [%{role: "system", content: system_content <> "\n\n" <> instruction} | rest]
+        [%{"role" => "system", "content" => system_content <> "\n\n" <> instruction} | rest]
 
       [%{"role" => "system", "content" => system_content} | rest] ->
         [%{"role" => "system", "content" => system_content <> "\n\n" <> instruction} | rest]
