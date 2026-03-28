@@ -133,7 +133,7 @@ Noter.Notes
 ### Pipeline Flow
 
 ```
-Session (status: "reviewed")
+Session (status: "reviewed" → "noting")
   │
   ├─ 1. Transcript.apply_corrections(raw_turns, replacements, edits)
   │     → [{speaker, start, end, text}, ...]
@@ -272,19 +272,24 @@ Port directly from the n8n workflow nodes:
 
 ### Phase 4: UI — Campaign Context + Notes Generation
 
-**Goal**: Session context editing + notes generation trigger + progress + display
+**Goal**: Session context editing + notes generation trigger + progress + display + status flow update
 
-1. **Session context editor** (on session show page)
+1. **Add `noting` status** to the session status flow
+   - Add `"noting"` to `@valid_statuses` in `Session` schema
+   - Pipeline sets `status: "noting"` when it begins (alongside `notes_status: "running"`)
+   - On success: `status: "done"`; on error: revert to `status: "reviewed"`
+   - Update `finalized?/1` to include `"noting"` (session is still finalized while notes generate)
+2. **Session context editor** (on session show page)
    - Textarea for editing the session's campaign context markdown document
    - Can be added/updated at any time before or after transcript finalization
    - In the future, auto-populated from previous session's context + notes
-2. **Session show page — notes step** (visible when status is "reviewed")
-   - "Generate Notes" button → kicks off pipeline
+3. **Session show page — notes step** (visible when status is `reviewed`, `noting`, or `done`)
+   - "Generate Notes" button (when `reviewed`) → kicks off pipeline, status becomes `noting`
    - Progress indicator during generation (chunk X of Y extracting, then writing)
-   - Display generated markdown (rendered)
-   - "Regenerate" button to re-run
+   - Display generated markdown (rendered) when `done`
+   - "Regenerate" button to re-run from `done`
    - Error display with retry
-3. **Update download ZIP structure** — download available from `reviewed` or `done`. The ZIP should have this structure:
+4. **Update download ZIP structure** — download available from `reviewed`, `noting`, or `done`. The ZIP should have this structure:
    ```
    {Campaign} {Session}/
    ├── campaign-context.md          -- session.context (if present)
@@ -300,7 +305,7 @@ Port directly from the n8n workflow nodes:
    └── vocab.txt
    ```
    Update `DownloadController` to:
-   - Allow download from `reviewed` (not just `done`)
+   - Allow download from `reviewed` or later (not just `done`)
    - Add `campaign-context.md` entry from `session.context`
    - Add `{session-slug}-notes.md` entry from `session.session_notes`
    - Both new files are optional — only included when present
@@ -324,15 +329,14 @@ No new Hex packages needed:
 
 1. **Chunk size**: Fixed at 10 minutes. Working well in the current pipeline.
 2. **Re-generation**: Overwrite previous notes. Transcript + context are the source of truth.
-3. **Status flow change**: "done" moves to the very end (after notes generation). New status `reviewed` inserted for "transcript finalized, SRT generated." Full flow becomes:
+3. **Status flow change**: "done" moves to the very end (after notes generation). New status `reviewed` inserted for "transcript finalized, SRT generated." Full flow:
 
 ```
-uploading → uploaded → trimming → trimmed → transcribing → transcribed → reviewing → reviewed → <writing notes status> → done
+uploading → uploaded → trimming → trimmed → transcribing → transcribed → reviewing → reviewed → noting → done
 ```
-
-we need a new status for when its actively writing notes between transcribed and done. not sure what to call that.
 
 - `reviewed` = transcript corrections locked, SRT generated (what "done" means today)
+- `noting` = notes pipeline is actively running (extraction + writing)
 - `done` = notes generated, full pipeline complete
 - Notes generation available from `reviewed` status
-- Download available from `reviewed` or `done` (includes notes in ZIP when present)
+- Download available from `reviewed` or later (includes notes in ZIP when present)
