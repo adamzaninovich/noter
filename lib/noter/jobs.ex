@@ -52,6 +52,7 @@ defmodule Noter.Jobs do
         finish_trim_task(session, session_id, start_seconds, end_seconds)
 
       error ->
+        Logger.error("Trim failed for session #{session_id}: #{inspect(error)}")
         session = Sessions.get_session!(session_id)
 
         case Sessions.update_session(session, %{status: "uploading"}) do
@@ -83,7 +84,8 @@ defmodule Noter.Jobs do
         # Auto-chain: start transcription after trim completes
         start_transcription_submit(updated)
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to update session #{session_id} after trim: #{inspect(changeset)}")
         broadcast(session_id, {:trim_complete, {:error, "Failed to update session"}})
     end
   end
@@ -106,6 +108,10 @@ defmodule Noter.Jobs do
             broadcast(session_id, {:peaks_ready, updated})
           else
             {:error, reason} ->
+              Logger.error(
+                "Peaks generation failed for session #{session_id}: #{inspect(reason)}"
+              )
+
               broadcast(session_id, {:peaks_failed, reason})
           end
         end)
@@ -145,10 +151,15 @@ defmodule Noter.Jobs do
             finish_upload_processing_task(session, campaign)
 
           {:error, reason} ->
+            Logger.error(
+              "Upload processing failed for campaign #{campaign.id}: #{inspect(reason)}"
+            )
+
             broadcast_upload(campaign.id, {:upload_processed, {:error, reason}})
         end
 
       {:error, changeset} ->
+        Logger.error("Session creation failed for campaign #{campaign.id}: #{inspect(changeset)}")
         broadcast_upload(campaign.id, {:upload_processed, {:error, changeset}})
     end
   end
@@ -227,7 +238,19 @@ defmodule Noter.Jobs do
   def cancel_existing_transcription(session) do
     if session.transcription_job_id do
       stop_sse_client(session.id)
-      Noter.Transcription.cancel_job(session.transcription_job_id)
+
+      case Noter.Transcription.cancel_job(session.transcription_job_id) do
+        :ok ->
+          :ok
+
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Failed to cancel transcription job #{session.transcription_job_id}: #{inspect(reason)}"
+          )
+      end
     end
 
     :ok

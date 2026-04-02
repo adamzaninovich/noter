@@ -44,15 +44,17 @@ defmodule NoterWeb.SessionLive.AutoChainTest do
       {:ok, session: session}
     end
 
-    test "finalize transitions to noting and triggers notes generation",
+    test "finalize transitions to noting and shows notes generation form",
          %{conn: conn, campaign: campaign, session: session} do
       {:ok, view, _html} =
         live(conn, ~p"/campaigns/#{campaign.slug}/sessions/#{session.slug}")
 
       html = render_click(view, "finalize")
 
-      # Flash confirms the auto-chain fired
-      assert html =~ "Generating notes..."
+      # Shows the notes generation card with context field and generate button
+      assert html =~ "Generate Notes"
+      assert html =~ "notes-context"
+      assert html =~ "generate-notes-btn"
     end
   end
 

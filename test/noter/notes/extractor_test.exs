@@ -53,7 +53,7 @@ defmodule Noter.Notes.ExtractorTest do
       assert facts["locations"] == [%{"name" => "Dungeon", "notes" => "Dark and foreboding"}]
     end
 
-    test "sends response_format schema in request" do
+    test "sends json_schema in Chat Completions format" do
       setup_settings()
 
       plug = fn conn ->
@@ -61,23 +61,23 @@ defmodule Noter.Notes.ExtractorTest do
         decoded = Jason.decode!(body)
         assert decoded["response_format"]["type"] == "json_schema"
         schema = decoded["response_format"]["json_schema"]["schema"]
-        assert schema["required"] |> Enum.member?("events")
-        assert schema["required"] |> Enum.member?("npcs")
+        assert "events" in schema["required"]
+        assert "npcs" in schema["required"]
         Req.Test.json(conn, chat_response(Jason.encode!(@valid_facts)))
       end
 
       assert {:ok, _} = Extractor.extract(@chunk, @context, plug: plug)
     end
 
-    test "includes chunk range in the request messages" do
+    test "includes chunk range in the messages" do
       setup_settings()
 
       plug = fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         decoded = Jason.decode!(body)
-        user_content = Enum.find(decoded["messages"], &(&1["role"] == "user"))["content"]
-        assert user_content =~ "00:00:00"
-        assert user_content =~ "00:10:00"
+        user_msg = Enum.find(decoded["messages"], &(&1["role"] == "user"))["content"]
+        assert user_msg =~ "00:00:00"
+        assert user_msg =~ "00:10:00"
         Req.Test.json(conn, chat_response(Jason.encode!(@valid_facts)))
       end
 

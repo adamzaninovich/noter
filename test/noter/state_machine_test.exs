@@ -123,7 +123,7 @@ defmodule Noter.StateMachineTest do
   end
 
   describe "error revert transitions" do
-    test "notes failure reverts noting → reviewing", %{session: session} do
+    test "notes failure stays on noting", %{session: session} do
       {:ok, s} =
         Sessions.update_transcription(session, %{
           status: "reviewing",
@@ -133,15 +133,14 @@ defmodule Noter.StateMachineTest do
       {:ok, s} = Sessions.finalize(s)
       assert s.status == "noting"
 
-      # Simulate pipeline failure
-      {:ok, reverted} =
+      # Simulate pipeline failure — stays on noting so user can retry
+      {:ok, failed} =
         Sessions.update_session_notes(s, %{
-          status: "reviewing",
           notes_error: "LLM unavailable"
         })
 
-      assert reverted.status == "reviewing"
-      assert reverted.notes_error == "LLM unavailable"
+      assert failed.status == "noting"
+      assert failed.notes_error == "LLM unavailable"
     end
   end
 

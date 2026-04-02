@@ -146,13 +146,26 @@ defmodule Noter.Transcription.SSEClient do
 
   defp handle_sse_event(%{"data" => data_str}, state) do
     case Jason.decode(data_str) do
-      {:ok, %{"type" => type} = data} -> dispatch_event(type, data, state)
-      {:ok, _data} -> state
-      {:error, _} -> state
+      {:ok, %{"type" => type} = data} ->
+        dispatch_event(type, data, state)
+
+      {:ok, data} ->
+        Logger.warning("SSE event missing 'type' field: #{inspect(data)}")
+        state
+
+      {:error, error} ->
+        Logger.warning(
+          "SSE event JSON decode failed: #{inspect(error)}, raw=#{inspect(String.slice(data_str, 0..200))}"
+        )
+
+        state
     end
   end
 
-  defp handle_sse_event(_event, state), do: state
+  defp handle_sse_event(event, state) do
+    Logger.warning("SSE event with no 'data' field: #{inspect(event)}")
+    state
+  end
 
   defp dispatch_event("queued", _data, state) do
     broadcast(state.session_id, :queued, %{})

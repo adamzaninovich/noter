@@ -56,27 +56,36 @@ defmodule Noter.Notes.Pipeline do
     context = session.context
     concurrency = Settings.get("llm_extraction_concurrency", 4)
 
+    completed = :counters.new(1, [])
+
     extraction_result =
       chunks
       |> Task.async_stream(
-        fn chunk -> Extractor.extract(chunk, context, opts) end,
-        max_concurrency: concurrency,
-        timeout: :infinity,
-        ordered: true
-      )
-      |> Enum.reduce_while({:ok, [], 0}, fn task_result, {:ok, acc, completed} ->
-        case task_result do
-          {:ok, {:ok, facts}} ->
-            new_completed = completed + 1
+        fn chunk ->
+          result = Extractor.extract(chunk, context, opts)
+
+          if match?({:ok, _}, result) do
+            :counters.add(completed, 1, 1)
 
             broadcast(
               session_id,
-              {:notes_progress, %{stage: :extracting, completed: new_completed, total: total}}
+              {:notes_progress,
+               %{stage: :extracting, completed: :counters.get(completed, 1), total: total}}
             )
+          end
 
-            {:cont, {:ok, [{completed, facts} | acc], new_completed}}
+          {chunk.index, result}
+        end,
+        max_concurrency: concurrency,
+        timeout: :infinity,
+        ordered: false
+      )
+      |> Enum.reduce_while({:ok, []}, fn task_result, {:ok, acc} ->
+        case task_result do
+          {:ok, {index, {:ok, facts}}} ->
+            {:cont, {:ok, [{index, facts} | acc]}}
 
-          {:ok, {:error, reason}} ->
+          {:ok, {_index, {:error, reason}}} ->
             {:halt, {:error, "Extraction failed: #{reason}"}}
 
           {:exit, reason} ->
@@ -85,8 +94,8 @@ defmodule Noter.Notes.Pipeline do
       end)
 
     case extraction_result do
-      {:ok, chunk_facts_rev, _} ->
-        aggregated = chunk_facts_rev |> Enum.reverse() |> Aggregator.aggregate()
+      {:ok, chunk_facts} ->
+        aggregated = chunk_facts |> Enum.sort_by(&elem(&1, 0)) |> Aggregator.aggregate()
         write_and_persist(session, aggregated, context, opts)
 
       {:error, reason} ->
@@ -118,12 +127,12 @@ defmodule Noter.Notes.Pipeline do
   defp handle_failure(session_id, reason) do
     session = Sessions.get_session!(session_id)
 
-    case Sessions.update_session_notes(session, %{status: "reviewing", notes_error: reason}) do
+    case Sessions.update_session_notes(session, %{notes_error: reason}) do
       {:ok, _} ->
         :ok
 
       {:error, err} ->
-        Logger.error("Failed to revert session #{session_id} to reviewing: #{inspect(err)}")
+        Logger.error("Failed to save notes error for session #{session_id}: #{inspect(err)}")
     end
 
     broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})

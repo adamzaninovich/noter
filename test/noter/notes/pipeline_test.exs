@@ -74,6 +74,7 @@ defmodule Noter.Notes.PipelineTest do
     }
   end
 
+  # Extraction has response_format (json_schema), writing does not
   defp dual_plug(extraction_response, writing_response) do
     fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -109,7 +110,7 @@ defmodule Noter.Notes.PipelineTest do
       assert session.status == "noting"
     end
 
-    test "extraction failure reverts to reviewing" do
+    test "extraction failure stays on noting" do
       session = setup_session()
       setup_llm_settings()
 
@@ -123,10 +124,10 @@ defmodule Noter.Notes.PipelineTest do
 
       updated = Sessions.get_session!(session.id)
       assert updated.notes_error =~ "Extraction failed"
-      assert updated.status == "reviewing"
+      assert updated.status == "noting"
     end
 
-    test "writing failure reverts to reviewing" do
+    test "writing failure stays on noting" do
       session = setup_session()
       setup_llm_settings()
 
@@ -147,7 +148,7 @@ defmodule Noter.Notes.PipelineTest do
 
       updated = Sessions.get_session!(session.id)
       assert updated.notes_error =~ "API error 500"
-      assert updated.status == "reviewing"
+      assert updated.status == "noting"
     end
 
     test "returns error for non-noting session" do

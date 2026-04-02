@@ -1,6 +1,8 @@
 defmodule NoterWeb.SessionLive.Show do
   use NoterWeb, :live_view
 
+  require Logger
+
   alias Noter.Jobs
   alias Noter.Sessions
   alias Noter.Transcription
@@ -45,6 +47,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:transcription_progress, nil)
       |> assign(:transcription_status, nil)
       |> assign(:upload_progress, nil)
+      |> assign(:notes_progress, nil)
       |> assign_audio_urls(session)
 
     socket =
@@ -313,6 +316,49 @@ defmodule NoterWeb.SessionLive.Show do
             </div>
           </div>
         <% end %>
+
+        <%!-- Notes generation card --%>
+        <div :if={@session.status == "noting" and @review_loaded?} class="card bg-base-200 shadow-sm">
+          <div class="card-body">
+            <%= if @active_job == :notes do %>
+              <div class="flex flex-col items-center py-8 gap-4">
+                <span class="loading loading-spinner loading-lg text-primary"></span>
+                <p :if={@notes_progress} class="text-base-content/70">
+                  Extracting facts... ({@notes_progress.completed}/{@notes_progress.total} chunks)
+                </p>
+                <p :if={is_nil(@notes_progress)} class="text-base-content/70">
+                  Generating notes...
+                </p>
+              </div>
+            <% else %>
+              <h2 class="card-title text-lg">
+                <.icon name="hero-document-text" class="size-5" /> Generate Notes
+              </h2>
+              <div :if={@session.notes_error} class="alert alert-error text-sm mt-1">
+                <.icon name="hero-exclamation-triangle-mini" class="size-4" />
+                <span>Previous attempt failed: {@session.notes_error}</span>
+              </div>
+              <p class="text-sm text-base-content/60">
+                Add any context the LLM should know about (character names, prior events, etc.)
+                before generating notes.
+              </p>
+              <.form for={%{}} id="notes-form" phx-submit="generate_notes" class="mt-2">
+                <textarea
+                  name="context"
+                  rows="4"
+                  placeholder="Optional context for the LLM..."
+                  class="textarea textarea-bordered w-full text-sm"
+                  id="notes-context"
+                >{@session.context}</textarea>
+                <div class="mt-3">
+                  <button type="submit" id="generate-notes-btn" class="btn btn-primary btn-sm">
+                    <.icon name="hero-sparkles" class="size-4" /> Generate Notes
+                  </button>
+                </div>
+              </.form>
+            <% end %>
+          </div>
+        </div>
 
         <%!-- Done summary card --%>
         <%= if @done_stats do %>
@@ -950,13 +996,14 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   # Derives the active background job from the Registry and session status.
-  # Returns :peaks, :trimming, :transcribing, or nil.
+  # Returns :peaks, :trimming, :transcribing, :notes, or nil.
   defp active_job(session) do
     cond do
       Jobs.running?(session.id, :peaks) -> :peaks
       Jobs.running?(session.id, :trim) -> :trimming
       Jobs.running?(session.id, :transcription_submit) -> :transcribing
       session.status == "transcribing" -> :transcribing
+      Jobs.running?(session.id, :notes) -> :notes
       true -> nil
     end
   end
@@ -1023,7 +1070,8 @@ defmodule NoterWeb.SessionLive.Show do
           {:ok, session} ->
             {:noreply, recompute_review(socket, session)}
 
-          {:error, _changeset} ->
+          {:error, changeset} ->
+            Logger.error("Failed to save replacement: #{inspect(changeset)}")
             {:noreply, put_flash(socket, :error, "Failed to save replacement.")}
         end
     end
@@ -1041,7 +1089,8 @@ defmodule NoterWeb.SessionLive.Show do
       {:ok, session} ->
         {:noreply, recompute_review(socket, session)}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to remove replacement: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to remove replacement.")}
     end
   end
@@ -1074,7 +1123,8 @@ defmodule NoterWeb.SessionLive.Show do
                |> recompute_review(session)
                |> put_flash(:info, "Imported #{map_size(map)} replacement(s).")}
 
-            {:error, _} ->
+            {:error, reason} ->
+              Logger.error("Failed to import replacements: #{inspect(reason)}")
               {:noreply, put_flash(socket, :error, "Failed to import.")}
           end
         else
@@ -1168,7 +1218,8 @@ defmodule NoterWeb.SessionLive.Show do
       {:ok, session} ->
         {:noreply, recompute_review(socket, session)}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to save edit: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to save edit.")}
     end
   end
@@ -1185,7 +1236,8 @@ defmodule NoterWeb.SessionLive.Show do
       {:ok, session} ->
         {:noreply, recompute_review(socket, session)}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to delete turn: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to delete turn.")}
     end
   end
@@ -1203,7 +1255,8 @@ defmodule NoterWeb.SessionLive.Show do
       {:ok, session} ->
         {:noreply, recompute_review(socket, session)}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to remove edit: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to remove edit.")}
     end
   end
@@ -1216,21 +1269,39 @@ defmodule NoterWeb.SessionLive.Show do
         %{raw_turns: raw_turns, replacements: replacements, edits: edits} = socket.assigns
         done_stats = compute_done_stats(session, raw_turns, replacements, edits)
 
-        # Auto-chain: start notes generation
+        {:noreply,
+         socket
+         |> assign(:session, session)
+         |> assign(:done_stats, done_stats)
+         |> assign(:read_only?, true)}
+
+      {:error, :invalid_status} ->
+        {:noreply, put_flash(socket, :error, "Session is not in the reviewing state.")}
+
+      {:error, changeset} ->
+        Logger.error("Failed to finalize session: #{inspect(changeset)}")
+        {:noreply, put_flash(socket, :error, "Failed to finalize.")}
+    end
+  end
+
+  def handle_event("generate_notes", %{"context" => context}, socket) do
+    session = socket.assigns.session
+    context = String.trim(context)
+    context_value = if context == "", do: nil, else: context
+
+    case Sessions.update_session_notes(session, %{context: context_value, notes_error: nil}) do
+      {:ok, session} ->
         Jobs.start_notes_generation(session)
 
         {:noreply,
          socket
          |> assign(:session, session)
-         |> assign(:done_stats, done_stats)
-         |> assign(:read_only?, true)
+         |> assign(:active_job, :notes)
          |> put_flash(:info, "Generating notes...")}
 
-      {:error, :invalid_status} ->
-        {:noreply, put_flash(socket, :error, "Session is not in the reviewing state.")}
-
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed to finalize.")}
+      {:error, changeset} ->
+        Logger.error("Failed to save context: #{inspect(changeset)}")
+        {:noreply, put_flash(socket, :error, "Failed to save context.")}
     end
   end
 
@@ -1248,7 +1319,8 @@ defmodule NoterWeb.SessionLive.Show do
       {:error, :invalid_status} ->
         {:noreply, put_flash(socket, :error, "Session is not in the done state.")}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to edit session: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to edit session.")}
     end
   end
@@ -1411,6 +1483,32 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:session, session)
      |> assign(:active_job, nil)
      |> assign(:transcription_progress, nil)}
+  end
+
+  def handle_info({:notes_progress, %{stage: :extracting} = progress}, socket) do
+    {:noreply, assign(socket, :notes_progress, progress)}
+  end
+
+  def handle_info({:notes_progress, %{stage: :complete}}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:active_job, nil)
+     |> assign(:notes_progress, nil)
+     |> put_flash(:info, "Notes generated successfully.")}
+  end
+
+  def handle_info({:notes_progress, %{stage: :error, error: reason}}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:active_job, nil)
+     |> assign(:notes_progress, nil)
+     |> put_flash(:error, "Notes generation failed: #{reason}")}
   end
 
   defp reconnect_transcription(socket, session) do
