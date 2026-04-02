@@ -96,7 +96,7 @@ defmodule Noter.Sessions do
     end
   end
 
-  defp apply_campaign_replacements(session, %{status: "transcribed"}) do
+  defp apply_campaign_replacements(session, %{status: "reviewing"}) do
     campaign_replacements = session.campaign.common_replacements || %{}
 
     if campaign_replacements == %{} do
@@ -136,21 +136,14 @@ defmodule Noter.Sessions do
     Session.changeset(session, attrs)
   end
 
-  def update_corrections(%Session{} = session, corrections_map) do
-    status =
-      if session.status in ~w(transcribed) or Session.finalized?(session),
-        do: "reviewing",
-        else: session.status
-
+  def update_corrections(%Session{status: "reviewing"} = session, corrections_map) do
     session
-    |> Session.corrections_changeset(%{
-      corrections: corrections_map,
-      status: status,
-      transcript_srt: nil
-    })
+    |> Session.corrections_changeset(%{corrections: corrections_map})
     |> Repo.update()
     |> broadcast_session_update()
   end
+
+  def update_corrections(%Session{}, _corrections_map), do: {:error, :invalid_status}
 
   def add_replacement(%Session{} = session, find, replace) do
     replacements =
@@ -179,7 +172,12 @@ defmodule Noter.Sessions do
     update_corrections(session, Session.put_corrections(session, "edits", edits))
   end
 
-  def finalize(%Session{} = session) do
+  @doc """
+  Finalize a session: generate SRT, set status to `noting`.
+  This is the `reviewing → noting` transition. The caller should auto-start
+  notes generation after this succeeds.
+  """
+  def finalize(%Session{status: "reviewing"} = session) do
     alias Noter.Transcription.Transcript
 
     raw_turns = Transcript.parse_turns(session.transcript_json)
@@ -194,17 +192,30 @@ defmodule Noter.Sessions do
     srt = Transcript.segments_to_srt(corrected_turns)
 
     session
-    |> Session.corrections_changeset(%{status: "reviewed", transcript_srt: srt})
+    |> Session.corrections_changeset(%{status: "noting", transcript_srt: srt})
     |> Repo.update()
     |> broadcast_session_update()
   end
 
-  def unfinalize(%Session{} = session) do
+  def finalize(%Session{}), do: {:error, :invalid_status}
+
+  @doc """
+  Edit session: `done → reviewing` backward transition.
+  Clears session_notes, notes_error, and transcript_srt.
+  """
+  def edit_session(%Session{status: "done"} = session) do
     session
-    |> Session.corrections_changeset(%{status: "reviewing", transcript_srt: nil})
+    |> Session.notes_changeset(%{
+      status: "reviewing",
+      session_notes: nil,
+      notes_error: nil,
+      transcript_srt: nil
+    })
     |> Repo.update()
     |> broadcast_session_update()
   end
+
+  def edit_session(%Session{}), do: {:error, :invalid_status}
 
   def add_replacements(%Session{} = session, new_replacements) when is_map(new_replacements) do
     existing = Session.replacements(session)
@@ -218,14 +229,6 @@ defmodule Noter.Sessions do
     |> Session.notes_changeset(attrs)
     |> Repo.update()
     |> broadcast_session_update()
-  end
-
-  def clear_session_notes(%Session{} = session) do
-    update_session_notes(session, %{
-      session_notes: nil,
-      notes_status: nil,
-      notes_error: nil
-    })
   end
 
   def remove_replacement(%Session{} = session, find) do

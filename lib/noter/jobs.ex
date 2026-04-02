@@ -4,6 +4,8 @@ defmodule Noter.Jobs do
   so they survive LiveView disconnects. Progress is broadcast via PubSub.
   """
 
+  require Logger
+
   alias Noter.Notes.Pipeline, as: NotesPipeline
   alias Noter.{Sessions, Uploads}
 
@@ -50,6 +52,19 @@ defmodule Noter.Jobs do
         finish_trim_task(session, session_id, start_seconds, end_seconds)
 
       error ->
+        Logger.error("Trim failed for session #{session_id}: #{inspect(error)}")
+        session = Sessions.get_session!(session_id)
+
+        case Sessions.update_session(session, %{status: "uploading"}) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error(
+              "Failed to revert session #{session_id} to uploading: #{inspect(reason)}"
+            )
+        end
+
         broadcast(session_id, {:trim_complete, error})
     end
   end
@@ -58,7 +73,7 @@ defmodule Noter.Jobs do
     session = Sessions.get_session!(session_id)
 
     case Sessions.update_session(session, %{
-           status: "trimmed",
+           status: "trimming",
            trim_start_seconds: start_seconds,
            trim_end_seconds: end_seconds
          }) do
@@ -66,7 +81,11 @@ defmodule Noter.Jobs do
         Uploads.cleanup_wav(session_id)
         broadcast(session_id, {:trim_complete, :ok, updated})
 
-      {:error, _changeset} ->
+        # Auto-chain: start transcription after trim completes
+        start_transcription_submit(updated)
+
+      {:error, changeset} ->
+        Logger.error("Failed to update session #{session_id} after trim: #{inspect(changeset)}")
         broadcast(session_id, {:trim_complete, {:error, "Failed to update session"}})
     end
   end
@@ -89,6 +108,10 @@ defmodule Noter.Jobs do
             broadcast(session_id, {:peaks_ready, updated})
           else
             {:error, reason} ->
+              Logger.error(
+                "Peaks generation failed for session #{session_id}: #{inspect(reason)}"
+              )
+
               broadcast(session_id, {:peaks_failed, reason})
           end
         end)
@@ -128,10 +151,15 @@ defmodule Noter.Jobs do
             finish_upload_processing_task(session, campaign)
 
           {:error, reason} ->
+            Logger.error(
+              "Upload processing failed for campaign #{campaign.id}: #{inspect(reason)}"
+            )
+
             broadcast_upload(campaign.id, {:upload_processed, {:error, reason}})
         end
 
       {:error, changeset} ->
+        Logger.error("Session creation failed for campaign #{campaign.id}: #{inspect(changeset)}")
         broadcast_upload(campaign.id, {:upload_processed, {:error, changeset}})
     end
   end
@@ -139,7 +167,7 @@ defmodule Noter.Jobs do
   defp finish_upload_processing_task(session, campaign) do
     session = Sessions.get_session!(session.id)
 
-    case Sessions.update_session(session, %{status: "uploaded"}) do
+    case Sessions.update_session(session, %{status: "trimming"}) do
       {:ok, updated} ->
         broadcast_upload(campaign.id, {:upload_processed, {:ok, updated}})
 
@@ -153,14 +181,33 @@ defmodule Noter.Jobs do
 
     cancel_existing_transcription(session)
 
+    # Set status to transcribing immediately so it survives page refresh
+    session = Sessions.get_session!(session_id)
+    {:ok, _} = Sessions.update_session(session, %{status: "transcribing"})
+    broadcast(session_id, {:transcription_status_changed, "transcribing"})
+
     Task.Supervisor.start_child(@supervisor, fn ->
-      case Noter.Transcription.submit_job(session_id) do
+      Registry.register(@registry, {session_id, :transcription_submit}, [])
+
+      last_broadcast = :atomics.new(1, signed: true)
+      :atomics.put(last_broadcast, 1, System.monotonic_time(:millisecond))
+
+      on_progress = fn bytes_sent, total_bytes ->
+        now = System.monotonic_time(:millisecond)
+        last = :atomics.get(last_broadcast, 1)
+
+        if now - last > 250 or bytes_sent == total_bytes do
+          :atomics.put(last_broadcast, 1, now)
+          broadcast(session_id, {:upload_progress, bytes_sent, total_bytes})
+        end
+      end
+
+      case Noter.Transcription.submit_job(session_id, on_progress: on_progress) do
         {:ok, job_id} ->
           session = Sessions.get_session!(session_id)
 
           {:ok, updated} =
             Sessions.update_transcription(session, %{
-              status: "transcribing",
               transcription_job_id: job_id
             })
 
@@ -173,6 +220,16 @@ defmodule Noter.Jobs do
           broadcast(session_id, {:transcription_submitted, job_id})
 
         {:error, reason} ->
+          session = Sessions.get_session!(session_id)
+
+          case Sessions.update_session(session, %{status: "trimming"}) do
+            {:ok, _} ->
+              :ok
+
+            {:error, err} ->
+              Logger.error("Failed to revert session #{session_id} to trimming: #{inspect(err)}")
+          end
+
           broadcast(session_id, {:transcription_submit_failed, reason})
       end
     end)
@@ -181,7 +238,19 @@ defmodule Noter.Jobs do
   def cancel_existing_transcription(session) do
     if session.transcription_job_id do
       stop_sse_client(session.id)
-      Noter.Transcription.cancel_job(session.transcription_job_id)
+
+      case Noter.Transcription.cancel_job(session.transcription_job_id) do
+        :ok ->
+          :ok
+
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Failed to cancel transcription job #{session.transcription_job_id}: #{inspect(reason)}"
+          )
+      end
     end
 
     :ok

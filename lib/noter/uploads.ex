@@ -4,6 +4,8 @@ defmodule Noter.Uploads do
   track processing, waveform generation, and audio trimming.
   """
 
+  require Logger
+
   alias Noter.Prep
 
   def session_dir(session_id) do
@@ -55,8 +57,8 @@ defmodule Noter.Uploads do
       {:ok, renamed} = Prep.rename_flacs(extracted_dir, renamed_dir, campaign.player_map)
 
       on_progress.("Cleaning up temporary files...")
-      File.rm(zip_path)
-      File.rm_rf(extracted_dir)
+      log_file_op(File.rm(zip_path), "rm #{zip_path}")
+      log_file_op(File.rm_rf(extracted_dir), "rm_rf #{extracted_dir}")
       {:ok, renamed}
     end
   end
@@ -142,7 +144,7 @@ defmodule Noter.Uploads do
              duration,
              fn pct -> on_progress.("merged.m4a", pct) end
            ) do
-      File.rm(trimmed_wav)
+      log_file_op(File.rm(trimmed_wav), "rm #{trimmed_wav}")
       :ok
     else
       error ->
@@ -152,9 +154,8 @@ defmodule Noter.Uploads do
   end
 
   def cleanup_wav(session_id) do
-    session_dir(session_id)
-    |> Path.join("merged.wav")
-    |> File.rm()
+    path = Path.join(session_dir(session_id), "merged.wav")
+    log_file_op(File.rm(path), "rm #{path}")
   end
 
   defp parallel_clip(jobs, start_seconds, duration, on_progress) do
@@ -275,5 +276,13 @@ defmodule Noter.Uploads do
   defp move_file!(source, dest) do
     File.cp!(source, dest)
     File.rm!(source)
+  end
+
+  defp log_file_op(:ok, _label), do: :ok
+  defp log_file_op({:ok, _} = result, _label), do: result
+
+  defp log_file_op({:error, reason} = error, label) do
+    Logger.warning("File operation failed (#{label}): #{inspect(reason)}")
+    error
   end
 end

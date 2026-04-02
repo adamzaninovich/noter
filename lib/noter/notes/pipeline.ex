@@ -4,6 +4,8 @@ defmodule Noter.Notes.Pipeline do
   Runs as a background job via `Noter.Jobs`.
   """
 
+  require Logger
+
   alias Noter.Notes.{Aggregator, Chunker, Extractor, Writer}
   alias Noter.Sessions
   alias Noter.Sessions.Session
@@ -14,42 +16,31 @@ defmodule Noter.Notes.Pipeline do
 
   @doc """
   Runs the full pipeline for the given session_id.
-  Steps:
-  1. Validate session is finalized
-  2. Set notes_status to "running"
-  3. Parse + apply corrections + chunk the transcript
-  4. Extract facts per chunk in parallel
-  5. Aggregate facts
-  6. Write markdown notes
-  7. Persist result and broadcast completion
+  Session must be in `noting` status (set by finalize).
   """
   def run(session_id, opts \\ []) do
     do_run(session_id, opts)
   rescue
     e ->
       reason = Exception.message(e)
-      session = Sessions.get_session!(session_id)
-      Sessions.update_session_notes(session, %{notes_status: "error", notes_error: reason})
-      broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
+      handle_failure(session_id, reason)
       {:error, reason}
   end
 
   defp do_run(session_id, opts) do
     session = Sessions.get_session!(session_id)
 
-    if Session.finalized?(session) do
+    if session.status == "noting" do
       run_pipeline(session, opts)
     else
-      reason = "Session is not finalized"
-      Sessions.update_session_notes(session, %{notes_status: "error", notes_error: reason})
-      broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
+      reason = "Session is not in noting status"
+      handle_failure(session_id, reason)
       {:error, reason}
     end
   end
 
   defp run_pipeline(session, opts) do
     session_id = session.id
-    Sessions.update_session_notes(session, %{notes_status: "running", notes_error: nil})
 
     raw_turns = Transcript.parse_turns(session.transcript_json)
 
@@ -65,27 +56,36 @@ defmodule Noter.Notes.Pipeline do
     context = session.context
     concurrency = Settings.get("llm_extraction_concurrency", 4)
 
+    completed = :counters.new(1, [])
+
     extraction_result =
       chunks
       |> Task.async_stream(
-        fn chunk -> Extractor.extract(chunk, context, opts) end,
-        max_concurrency: concurrency,
-        timeout: :infinity,
-        ordered: true
-      )
-      |> Enum.reduce_while({:ok, [], 0}, fn task_result, {:ok, acc, completed} ->
-        case task_result do
-          {:ok, {:ok, facts}} ->
-            new_completed = completed + 1
+        fn chunk ->
+          result = Extractor.extract(chunk, context, opts)
+
+          if match?({:ok, _}, result) do
+            :counters.add(completed, 1, 1)
 
             broadcast(
               session_id,
-              {:notes_progress, %{stage: :extracting, completed: new_completed, total: total}}
+              {:notes_progress,
+               %{stage: :extracting, completed: :counters.get(completed, 1), total: total}}
             )
+          end
 
-            {:cont, {:ok, [{completed, facts} | acc], new_completed}}
+          {chunk.index, result}
+        end,
+        max_concurrency: concurrency,
+        timeout: :infinity,
+        ordered: false
+      )
+      |> Enum.reduce_while({:ok, []}, fn task_result, {:ok, acc} ->
+        case task_result do
+          {:ok, {index, {:ok, facts}}} ->
+            {:cont, {:ok, [{index, facts} | acc]}}
 
-          {:ok, {:error, reason}} ->
+          {:ok, {_index, {:error, reason}}} ->
             {:halt, {:error, "Extraction failed: #{reason}"}}
 
           {:exit, reason} ->
@@ -94,32 +94,48 @@ defmodule Noter.Notes.Pipeline do
       end)
 
     case extraction_result do
-      {:ok, chunk_facts_rev, _} ->
-        aggregated = chunk_facts_rev |> Enum.reverse() |> Aggregator.aggregate()
+      {:ok, chunk_facts} ->
+        aggregated = chunk_facts |> Enum.sort_by(&elem(&1, 0)) |> Aggregator.aggregate()
+        write_and_persist(session, aggregated, context, opts)
 
-        case Writer.write(aggregated, context, opts) do
-          {:ok, markdown} ->
-            {:ok, updated} =
-              Sessions.update_session_notes(session, %{
-                notes_status: "complete",
-                session_notes: markdown
-              })
+      {:error, reason} ->
+        handle_failure(session_id, reason)
+        {:error, reason}
+    end
+  end
 
-            {:ok, _} = Sessions.update_session(updated, %{status: "done"})
-            broadcast(session_id, {:notes_progress, %{stage: :complete}})
+  defp write_and_persist(session, aggregated, context, opts) do
+    case Writer.write(aggregated, context, opts) do
+      {:ok, markdown} ->
+        case Sessions.update_session_notes(session, %{status: "done", session_notes: markdown}) do
+          {:ok, _} ->
+            broadcast(session.id, {:notes_progress, %{stage: :complete}})
             :ok
 
-          {:error, reason} ->
-            Sessions.update_session_notes(session, %{notes_status: "error", notes_error: reason})
-            broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
+          {:error, err} ->
+            reason = "Failed to save notes: #{inspect(err)}"
+            handle_failure(session.id, reason)
             {:error, reason}
         end
 
       {:error, reason} ->
-        Sessions.update_session_notes(session, %{notes_status: "error", notes_error: reason})
-        broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
+        handle_failure(session.id, reason)
         {:error, reason}
     end
+  end
+
+  defp handle_failure(session_id, reason) do
+    session = Sessions.get_session!(session_id)
+
+    case Sessions.update_session_notes(session, %{notes_error: reason}) do
+      {:ok, _} ->
+        :ok
+
+      {:error, err} ->
+        Logger.error("Failed to save notes error for session #{session_id}: #{inspect(err)}")
+    end
+
+    broadcast(session_id, {:notes_progress, %{stage: :error, error: reason}})
   end
 
   defp broadcast(session_id, message) do

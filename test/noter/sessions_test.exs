@@ -75,12 +75,12 @@ defmodule Noter.SessionsTest do
 
       {:ok, updated} =
         Sessions.update_transcription(session, %{
-          status: "transcribed",
+          status: "reviewing",
           transcript_json: "{}",
           transcription_job_id: "job_123"
         })
 
-      assert updated.status == "transcribed"
+      assert updated.status == "reviewing"
       assert updated.transcript_json == "{}"
       assert updated.corrections["replacements"]["npc"] == "NPC Name"
     end
@@ -90,16 +90,16 @@ defmodule Noter.SessionsTest do
 
       {:ok, updated} =
         Sessions.update_transcription(session, %{
-          status: "transcribed",
+          status: "reviewing",
           transcript_json: "{}",
           transcription_job_id: "job_123"
         })
 
-      assert updated.status == "transcribed"
+      assert updated.status == "reviewing"
       assert updated.corrections == nil || updated.corrections["replacements"] == nil
     end
 
-    test "skips campaign replacements for non-transcribed status", %{
+    test "skips campaign replacements for non-reviewing status", %{
       campaign: campaign,
       session: session
     } do
@@ -124,11 +124,11 @@ defmodule Noter.SessionsTest do
 
       {:ok, _updated} =
         Sessions.update_transcription(session, %{
-          status: "transcribed",
+          status: "reviewing",
           transcript_json: "{}"
         })
 
-      assert_receive {:session_updated, %Session{status: "transcribed"}}
+      assert_receive {:session_updated, %Session{status: "reviewing"}}
     end
 
     test "does not broadcast on failure", %{session: session} do
@@ -175,10 +175,10 @@ defmodule Noter.SessionsTest do
 
   describe "nil corrections safety" do
     setup %{session: session} do
-      # Force corrections to nil in the DB to simulate a NULL column
+      # Force corrections to nil and status to reviewing
       session =
         session
-        |> Ecto.Changeset.change(%{corrections: nil})
+        |> Ecto.Changeset.change(%{corrections: nil, status: "reviewing"})
         |> Repo.update!()
 
       assert session.corrections == nil
@@ -208,6 +208,98 @@ defmodule Noter.SessionsTest do
     test "add_replacements works when corrections is nil", %{session: session} do
       {:ok, updated} = Sessions.add_replacements(session, %{"Foo" => "bar", "BAZ" => "qux"})
       assert updated.corrections["replacements"] == %{"foo" => "bar", "baz" => "qux"}
+    end
+  end
+
+  describe "update_corrections/2 status guard" do
+    test "only allows corrections when status is reviewing", %{session: session} do
+      assert {:error, :invalid_status} =
+               Sessions.update_corrections(session, %{"replacements" => %{}})
+
+      {:ok, session} = Sessions.update_session(session, %{status: "reviewing"})
+
+      assert {:ok, _} =
+               Sessions.update_corrections(session, %{"replacements" => %{"a" => "b"}})
+    end
+  end
+
+  describe "finalize/1" do
+    setup %{session: session} do
+      transcript_json =
+        Jason.encode!(%{
+          "segments" => [
+            %{
+              "speaker" => "Alice",
+              "start" => 0.0,
+              "end" => 2.5,
+              "words" => [
+                %{"word" => " Hello", "start" => 0.0, "end" => 1.0},
+                %{"word" => " world", "start" => 1.0, "end" => 2.5}
+              ]
+            }
+          ]
+        })
+
+      session = Repo.preload(session, :campaign)
+
+      {:ok, session} =
+        Sessions.update_transcription(session, %{
+          status: "reviewing",
+          transcript_json: transcript_json
+        })
+
+      {:ok, session: session}
+    end
+
+    test "transitions from reviewing to noting", %{session: session} do
+      {:ok, updated} = Sessions.finalize(session)
+      assert updated.status == "noting"
+      assert updated.transcript_srt != nil
+    end
+
+    test "rejects finalize from non-reviewing status", %{session: session} do
+      {:ok, session} = Sessions.update_session(session, %{status: "uploading"})
+      assert {:error, :invalid_status} = Sessions.finalize(session)
+    end
+  end
+
+  describe "edit_session/1" do
+    setup %{session: session} do
+      session = Repo.preload(session, :campaign)
+
+      {:ok, session} =
+        Sessions.update_transcription(session, %{
+          status: "reviewing",
+          transcript_json: "{}"
+        })
+
+      {:ok, session} =
+        Sessions.update_session_notes(session, %{
+          status: "done",
+          session_notes: "some notes",
+          notes_error: nil
+        })
+
+      session =
+        session
+        |> Ecto.Changeset.change(%{transcript_srt: "some srt"})
+        |> Repo.update!()
+
+      {:ok, session: session}
+    end
+
+    test "transitions from done to reviewing and clears data", %{session: session} do
+      {:ok, updated} = Sessions.edit_session(session)
+      assert updated.status == "reviewing"
+      assert updated.session_notes == nil
+      assert updated.notes_error == nil
+      assert updated.transcript_srt == nil
+    end
+
+    test "rejects edit_session from non-done status" do
+      {:ok, campaign} = Campaigns.create_campaign(%{name: "C2", player_map: %{}})
+      {:ok, session} = Sessions.create_session(campaign, %{name: "S2"})
+      assert {:error, :invalid_status} = Sessions.edit_session(session)
     end
   end
 end

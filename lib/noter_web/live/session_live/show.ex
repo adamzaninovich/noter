@@ -1,9 +1,10 @@
 defmodule NoterWeb.SessionLive.Show do
   use NoterWeb, :live_view
 
+  require Logger
+
   alias Noter.Jobs
   alias Noter.Sessions
-  alias Noter.Sessions.Session
   alias Noter.Transcription
   alias Noter.Transcription.SSEClient
   alias Noter.Transcription.Transcript
@@ -14,10 +15,10 @@ defmodule NoterWeb.SessionLive.Show do
 
   @steps [
     {"uploading", "Upload"},
-    {"uploaded", "Trim"},
-    {"trimmed", "Transcribe"},
-    {"transcribed", "Review"},
-    {"reviewed", "Notes"},
+    {"trimming", "Trim"},
+    {"transcribing", "Transcribe"},
+    {"reviewing", "Review"},
+    {"noting", "Notes"},
     {"done", "Done"}
   ]
 
@@ -28,7 +29,7 @@ defmodule NoterWeb.SessionLive.Show do
 
     renamed_files = Uploads.list_renamed_files(session.id)
     session_dir = Uploads.session_dir(session.id)
-    trimming? = Jobs.running?(session.id, :trim)
+    active_job = active_job(session)
 
     socket =
       socket
@@ -39,14 +40,14 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.aac")))
       |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
       |> assign(:steps, @steps)
-      |> assign(:trimming?, trimming?)
-      |> assign_trim_files(renamed_files, trimming?)
-      |> assign(:generating_peaks?, Jobs.running?(session.id, :peaks))
+      |> assign(:active_job, active_job)
+      |> assign_trim_files(renamed_files, active_job == :trimming)
       |> assign(:trim_start, session.trim_start_seconds)
       |> assign(:trim_end, session.trim_end_seconds)
-      |> assign(:transcribing?, false)
       |> assign(:transcription_progress, nil)
       |> assign(:transcription_status, nil)
+      |> assign(:upload_progress, nil)
+      |> assign(:notes_progress, nil)
       |> assign_audio_urls(session)
 
     socket =
@@ -98,7 +99,7 @@ defmodule NoterWeb.SessionLive.Show do
         </ul>
 
         <%!-- Generating waveform spinner --%>
-        <%= if @generating_peaks? do %>
+        <%= if @active_job == :peaks do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <div class="flex flex-col items-center py-8 gap-4">
@@ -109,8 +110,8 @@ defmodule NoterWeb.SessionLive.Show do
           </div>
         <% end %>
 
-        <%!-- Trim card when status is "uploaded" --%>
-        <%= if @session.status == "uploaded" and not @trimming? and not @generating_peaks? and @audio_url do %>
+        <%!-- Trim editor: session is in trim stage, no active job, audio ready --%>
+        <%= if @session.status == "trimming" and is_nil(@active_job) and @audio_url do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <h2 class="card-title text-lg">Audio Trimming</h2>
@@ -203,7 +204,7 @@ defmodule NoterWeb.SessionLive.Show do
         <% end %>
 
         <%!-- Trimming progress --%>
-        <%= if @trimming? do %>
+        <%= if @active_job == :trimming do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <h2 class="card-title text-lg">Trimming Audio</h2>
@@ -228,30 +229,10 @@ defmodule NoterWeb.SessionLive.Show do
           </div>
         <% end %>
 
-        <%!-- Transcription card --%>
-        <%= if @session.status == "trimmed" and not @transcribing? do %>
-          <div class="card bg-base-200 shadow-sm">
-            <div class="card-body">
-              <h2 class="card-title text-lg">Transcription</h2>
-              <p class="text-sm text-base-content/60">
-                Send trimmed audio files to the transcription service.
-              </p>
-              <div class="flex justify-end mt-2">
-                <button
-                  id="start-transcription-btn"
-                  phx-click="start_transcription"
-                  class="btn btn-primary"
-                  phx-disable-with="Submitting..."
-                >
-                  Start Transcription
-                </button>
-              </div>
-            </div>
-          </div>
-        <% end %>
+        <%!-- Transcription is now auto-started after trim completes --%>
 
         <%!-- Transcription progress --%>
-        <%= if @transcribing? do %>
+        <%= if @active_job == :transcribing do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <h2 class="card-title text-lg">Transcription in Progress</h2>
@@ -297,6 +278,24 @@ defmodule NoterWeb.SessionLive.Show do
                   <p class="text-base-content/70">
                     {transcription_wait_message(@transcription_status)}
                   </p>
+                  <%= if @upload_progress do %>
+                    <div class="w-full max-w-md space-y-2">
+                      <progress
+                        class="progress progress-primary w-full"
+                        value={@upload_progress.bytes_sent}
+                        max={@upload_progress.total_bytes}
+                      >
+                      </progress>
+                      <div class="flex justify-between text-xs text-base-content/60">
+                        <span>
+                          {format_bytes(@upload_progress.bytes_sent)} / {format_bytes(
+                            @upload_progress.total_bytes
+                          )}
+                        </span>
+                        <span>{upload_speed(@upload_progress)}</span>
+                      </div>
+                    </div>
+                  <% end %>
                 </div>
               <% end %>
             </div>
@@ -304,7 +303,7 @@ defmodule NoterWeb.SessionLive.Show do
         <% end %>
 
         <%!-- Done summary skeleton --%>
-        <%= if Session.finalized?(@session) and not @review_loaded? do %>
+        <%= if @session.status in ~w(noting done) and not @review_loaded? do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <div class="skeleton h-6 w-48"></div>
@@ -318,6 +317,49 @@ defmodule NoterWeb.SessionLive.Show do
           </div>
         <% end %>
 
+        <%!-- Notes generation card --%>
+        <div :if={@session.status == "noting" and @review_loaded?} class="card bg-base-200 shadow-sm">
+          <div class="card-body">
+            <%= if @active_job == :notes do %>
+              <div class="flex flex-col items-center py-8 gap-4">
+                <span class="loading loading-spinner loading-lg text-primary"></span>
+                <p :if={@notes_progress} class="text-base-content/70">
+                  Extracting facts... ({@notes_progress.completed}/{@notes_progress.total} chunks)
+                </p>
+                <p :if={is_nil(@notes_progress)} class="text-base-content/70">
+                  Generating notes...
+                </p>
+              </div>
+            <% else %>
+              <h2 class="card-title text-lg">
+                <.icon name="hero-document-text" class="size-5" /> Generate Notes
+              </h2>
+              <div :if={@session.notes_error} class="alert alert-error text-sm mt-1">
+                <.icon name="hero-exclamation-triangle-mini" class="size-4" />
+                <span>Previous attempt failed: {@session.notes_error}</span>
+              </div>
+              <p class="text-sm text-base-content/60">
+                Add any context the LLM should know about (character names, prior events, etc.)
+                before generating notes.
+              </p>
+              <.form for={%{}} id="notes-form" phx-submit="generate_notes" class="mt-2">
+                <textarea
+                  name="context"
+                  rows="4"
+                  placeholder="Optional context for the LLM..."
+                  class="textarea textarea-bordered w-full text-sm"
+                  id="notes-context"
+                >{@session.context}</textarea>
+                <div class="mt-3">
+                  <button type="submit" id="generate-notes-btn" class="btn btn-primary btn-sm">
+                    <.icon name="hero-sparkles" class="size-4" /> Generate Notes
+                  </button>
+                </div>
+              </.form>
+            <% end %>
+          </div>
+        </div>
+
         <%!-- Done summary card --%>
         <%= if @done_stats do %>
           <div class="card bg-base-200 shadow-sm">
@@ -328,12 +370,13 @@ defmodule NoterWeb.SessionLive.Show do
                   Session Complete
                 </h2>
                 <button
-                  id="unfinalize-btn"
-                  phx-click="unfinalize"
+                  :if={@session.status == "done"}
+                  id="edit-session-btn"
+                  phx-click="edit_session"
                   class="btn btn-outline btn-sm shrink-0"
-                  phx-disable-with="Unfinalizing..."
+                  phx-disable-with="Reverting..."
                 >
-                  Back to Review
+                  Edit Session
                 </button>
               </div>
 
@@ -405,13 +448,13 @@ defmodule NoterWeb.SessionLive.Show do
             <div class="card-body">
               <div class="flex items-center justify-between">
                 <h2 class="card-title text-lg">
-                  {if(Session.finalized?(@session),
+                  {if(@session.status in ~w(noting done),
                     do: "Transcript",
                     else: "Transcript Review"
                   )}
                 </h2>
                 <div class="flex items-center gap-2">
-                  <%= if Session.finalized?(@session) do %>
+                  <%= if @session.status in ~w(noting done) do %>
                     <span class="badge badge-success gap-1">
                       <.icon name="hero-check-circle-mini" class="size-4" /> Finalized
                     </span>
@@ -428,7 +471,7 @@ defmodule NoterWeb.SessionLive.Show do
                 </div>
               </div>
               <p class="text-sm text-base-content/60 mb-2">
-                <%= if Session.finalized?(@session) do %>
+                <%= if @session.status in ~w(noting done) do %>
                   Read-only view of the finalized transcript.
                 <% else %>
                   Click any word to prefill the find field. Add replacements to fix transcription errors.
@@ -438,7 +481,7 @@ defmodule NoterWeb.SessionLive.Show do
                 <%!-- Left: transcript viewer --%>
                 <div class="flex-1 min-w-0 space-y-3">
                   <div
-                    :if={not Session.finalized?(@session)}
+                    :if={@session.status not in ~w(noting done)}
                     id="transcript-audio"
                     phx-hook=".TranscriptAudio"
                     phx-update="ignore"
@@ -471,7 +514,7 @@ defmodule NoterWeb.SessionLive.Show do
                   id="replacements-panel"
                   phx-hook=".DownloadJson"
                 >
-                  <%= if not Session.finalized?(@session) do %>
+                  <%= if @session.status not in ~w(noting done) do %>
                     <.form
                       for={@replacement_form}
                       id="replacement-form"
@@ -500,12 +543,12 @@ defmodule NoterWeb.SessionLive.Show do
                   <%= if @replacements != %{} do %>
                     <div class="flex items-center justify-between shrink-0 mb-1">
                       <div class="text-xs font-semibold text-base-content/60 uppercase tracking-wide">
-                        {if(Session.finalized?(@session),
+                        {if(@session.status in ~w(noting done),
                           do: "Replacements",
                           else: "Active Replacements"
                         )}
                       </div>
-                      <div :if={not Session.finalized?(@session)} class="flex gap-1">
+                      <div :if={@session.status not in ~w(noting done)} class="flex gap-1">
                         <button
                           type="button"
                           phx-click="export_replacements"
@@ -536,7 +579,7 @@ defmodule NoterWeb.SessionLive.Show do
                           <span class="badge badge-xs badge-ghost ml-auto">
                             {Map.get(@match_counts, find, 0)}
                           </span>
-                          <%= if not Session.finalized?(@session) do %>
+                          <%= if @session.status not in ~w(noting done) do %>
                             <button
                               type="button"
                               phx-click="remove_replacement"
@@ -551,7 +594,7 @@ defmodule NoterWeb.SessionLive.Show do
                     </div>
                   <% else %>
                     <div
-                      :if={not Session.finalized?(@session)}
+                      :if={@session.status not in ~w(noting done)}
                       class="flex justify-end shrink-0 mb-1"
                     >
                       <button
@@ -604,7 +647,7 @@ defmodule NoterWeb.SessionLive.Show do
         <% end %>
 
         <%!-- Uploaded files display --%>
-        <%= if @session.status in ~w(uploaded trimmed transcribing transcribed reviewing done) do %>
+        <%= if @session.status in ~w(trimming transcribing reviewing noting done) do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
               <h2 class="card-title text-lg">Uploaded Files</h2>
@@ -921,7 +964,7 @@ defmodule NoterWeb.SessionLive.Show do
     """
   end
 
-  @status_order ~w(uploading uploaded trimming trimmed transcribing transcribed reviewing reviewed done)
+  @status_order ~w(uploading trimming transcribing reviewing noting done)
 
   defp step_complete?(current_status, step_status) do
     current_idx = Enum.find_index(@status_order, &(&1 == current_status)) || 0
@@ -936,6 +979,34 @@ defmodule NoterWeb.SessionLive.Show do
   defp transcription_wait_message(:uploading), do: "Uploading files to transcription service..."
   defp transcription_wait_message(:queued), do: "Waiting in queue..."
   defp transcription_wait_message(_), do: "Waiting in queue..."
+
+  defp format_bytes(bytes) when bytes < 1_024, do: "#{bytes} B"
+  defp format_bytes(bytes) when bytes < 1_048_576, do: "#{Float.round(bytes / 1_024, 1)} KB"
+  defp format_bytes(bytes), do: "#{Float.round(bytes / 1_048_576, 1)} MB"
+
+  defp upload_speed(%{bytes_sent: bytes, started_at: started_at}) do
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+
+    if elapsed_ms > 100 do
+      bytes_per_sec = bytes / (elapsed_ms / 1_000)
+      "#{format_bytes(round(bytes_per_sec))}/s"
+    else
+      ""
+    end
+  end
+
+  # Derives the active background job from the Registry and session status.
+  # Returns :peaks, :trimming, :transcribing, :notes, or nil.
+  defp active_job(session) do
+    cond do
+      Jobs.running?(session.id, :peaks) -> :peaks
+      Jobs.running?(session.id, :trim) -> :trimming
+      Jobs.running?(session.id, :transcription_submit) -> :transcribing
+      session.status == "transcribing" -> :transcribing
+      Jobs.running?(session.id, :notes) -> :notes
+      true -> nil
+    end
+  end
 
   @impl true
   def handle_event("trim_region_updated", %{"start" => start, "end" => end_val}, socket) do
@@ -967,26 +1038,13 @@ defmodule NoterWeb.SessionLive.Show do
 
         {:noreply,
          socket
-         |> assign(:trimming?, true)
+         |> assign(:active_job, :trimming)
          |> assign(:trim_files, trim_files)}
     end
   end
 
-  def handle_event("start_transcription", _params, socket) do
-    session = socket.assigns.session
-
-    Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
-    Jobs.start_transcription_submit(session)
-
-    {:noreply,
-     socket
-     |> assign(:transcribing?, true)
-     |> assign(:transcription_progress, nil)
-     |> assign(:transcription_status, :uploading)}
-  end
-
   def handle_event("add_replacement", _, %{assigns: %{session: %{status: status}}} = socket)
-      when status in ["reviewed", "done"] do
+      when status in ["noting", "done"] do
     {:noreply, socket}
   end
 
@@ -1012,14 +1070,15 @@ defmodule NoterWeb.SessionLive.Show do
           {:ok, session} ->
             {:noreply, recompute_review(socket, session)}
 
-          {:error, _changeset} ->
+          {:error, changeset} ->
+            Logger.error("Failed to save replacement: #{inspect(changeset)}")
             {:noreply, put_flash(socket, :error, "Failed to save replacement.")}
         end
     end
   end
 
   def handle_event("remove_replacement", _, %{assigns: %{session: %{status: status}}} = socket)
-      when status in ["reviewed", "done"] do
+      when status in ["noting", "done"] do
     {:noreply, socket}
   end
 
@@ -1030,7 +1089,8 @@ defmodule NoterWeb.SessionLive.Show do
       {:ok, session} ->
         {:noreply, recompute_review(socket, session)}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to remove replacement: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to remove replacement.")}
     end
   end
@@ -1047,7 +1107,7 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   def handle_event("import_replacements", _, %{assigns: %{session: %{status: status}}} = socket)
-      when status in ["reviewed", "done"] do
+      when status in ["noting", "done"] do
     {:noreply, socket}
   end
 
@@ -1063,7 +1123,8 @@ defmodule NoterWeb.SessionLive.Show do
                |> recompute_review(session)
                |> put_flash(:info, "Imported #{map_size(map)} replacement(s).")}
 
-            {:error, _} ->
+            {:error, reason} ->
+              Logger.error("Failed to import replacements: #{inspect(reason)}")
               {:noreply, put_flash(socket, :error, "Failed to import.")}
           end
         else
@@ -1090,7 +1151,7 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   def handle_event("start_edit", _, %{assigns: %{session: %{status: status}}} = socket)
-      when status in ["reviewed", "done"] do
+      when status in ["noting", "done"] do
     {:noreply, socket}
   end
 
@@ -1145,7 +1206,7 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   def handle_event("save_edit", _, %{assigns: %{session: %{status: status}}} = socket)
-      when status in ["reviewed", "done"] do
+      when status in ["noting", "done"] do
     {:noreply, socket}
   end
 
@@ -1157,13 +1218,14 @@ defmodule NoterWeb.SessionLive.Show do
       {:ok, session} ->
         {:noreply, recompute_review(socket, session)}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to save edit: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to save edit.")}
     end
   end
 
   def handle_event("delete_turn", _, %{assigns: %{session: %{status: status}}} = socket)
-      when status in ["reviewed", "done"] do
+      when status in ["noting", "done"] do
     {:noreply, socket}
   end
 
@@ -1174,13 +1236,14 @@ defmodule NoterWeb.SessionLive.Show do
       {:ok, session} ->
         {:noreply, recompute_review(socket, session)}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to delete turn: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to delete turn.")}
     end
   end
 
   def handle_event("remove_edit", _, %{assigns: %{session: %{status: status}}} = socket)
-      when status in ["reviewed", "done"] do
+      when status in ["noting", "done"] do
     {:noreply, socket}
   end
 
@@ -1192,7 +1255,8 @@ defmodule NoterWeb.SessionLive.Show do
       {:ok, session} ->
         {:noreply, recompute_review(socket, session)}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to remove edit: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to remove edit.")}
     end
   end
@@ -1209,18 +1273,42 @@ defmodule NoterWeb.SessionLive.Show do
          socket
          |> assign(:session, session)
          |> assign(:done_stats, done_stats)
-         |> assign(:read_only?, true)
-         |> put_flash(:info, "Transcript finalized.")}
+         |> assign(:read_only?, true)}
 
-      {:error, _changeset} ->
+      {:error, :invalid_status} ->
+        {:noreply, put_flash(socket, :error, "Session is not in the reviewing state.")}
+
+      {:error, changeset} ->
+        Logger.error("Failed to finalize session: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to finalize.")}
     end
   end
 
-  def handle_event("unfinalize", _params, socket) do
+  def handle_event("generate_notes", %{"context" => context}, socket) do
+    session = socket.assigns.session
+    context = String.trim(context)
+    context_value = if context == "", do: nil, else: context
+
+    case Sessions.update_session_notes(session, %{context: context_value, notes_error: nil}) do
+      {:ok, session} ->
+        Jobs.start_notes_generation(session)
+
+        {:noreply,
+         socket
+         |> assign(:session, session)
+         |> assign(:active_job, :notes)
+         |> put_flash(:info, "Generating notes...")}
+
+      {:error, changeset} ->
+        Logger.error("Failed to save context: #{inspect(changeset)}")
+        {:noreply, put_flash(socket, :error, "Failed to save context.")}
+    end
+  end
+
+  def handle_event("edit_session", _params, socket) do
     session = socket.assigns.session
 
-    case Sessions.unfinalize(session) do
+    case Sessions.edit_session(session) do
       {:ok, session} ->
         {:noreply,
          socket
@@ -1228,8 +1316,12 @@ defmodule NoterWeb.SessionLive.Show do
          |> assign(:done_stats, nil)
          |> assign(:read_only?, false)}
 
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed to unfinalize.")}
+      {:error, :invalid_status} ->
+        {:noreply, put_flash(socket, :error, "Session is not in the done state.")}
+
+      {:error, changeset} ->
+        Logger.error("Failed to edit session: #{inspect(changeset)}")
+        {:noreply, put_flash(socket, :error, "Failed to edit session.")}
     end
   end
 
@@ -1252,7 +1344,7 @@ defmodule NoterWeb.SessionLive.Show do
     {:noreply,
      socket
      |> assign(:session, %{socket.assigns.session | duration_seconds: session.duration_seconds})
-     |> assign(:generating_peaks?, false)
+     |> assign(:active_job, nil)
      |> assign_audio_urls(session)
      |> put_flash(:info, "Waveform ready.")}
   end
@@ -1260,7 +1352,7 @@ defmodule NoterWeb.SessionLive.Show do
   def handle_info({:peaks_failed, reason}, socket) do
     {:noreply,
      socket
-     |> assign(:generating_peaks?, false)
+     |> assign(:active_job, nil)
      |> put_flash(:error, "Waveform generation failed: #{reason}")}
   end
 
@@ -1274,19 +1366,47 @@ defmodule NoterWeb.SessionLive.Show do
     {:noreply, assign(socket, :trim_files, trim_files)}
   end
 
-  def handle_info({:trim_complete, :ok, session}, socket) do
+  def handle_info({:trim_complete, :ok, _session}, socket) do
+    {:noreply, put_flash(socket, :info, "Audio trimmed. Starting transcription...")}
+  end
+
+  def handle_info({:transcription_status_changed, _status}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+    Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
+
     {:noreply,
      socket
      |> assign(:session, session)
-     |> assign(:trimming?, false)
-     |> put_flash(:info, "Audio trimmed successfully.")}
+     |> assign(:active_job, active_job(session))
+     |> assign(:transcription_progress, nil)
+     |> assign(:transcription_status, :uploading)}
   end
 
   def handle_info({:trim_complete, {:error, reason}}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
     {:noreply,
      socket
-     |> assign(:trimming?, false)
+     |> assign(:session, session)
+     |> assign(:active_job, nil)
      |> put_flash(:error, "Trimming failed: #{reason}")}
+  end
+
+  def handle_info({:upload_progress, bytes_sent, total_bytes}, socket) do
+    upload_progress = socket.assigns.upload_progress
+
+    started_at =
+      case upload_progress do
+        %{started_at: t} -> t
+        _ -> System.monotonic_time(:millisecond)
+      end
+
+    {:noreply,
+     assign(socket, :upload_progress, %{
+       bytes_sent: bytes_sent,
+       total_bytes: total_bytes,
+       started_at: started_at
+     })}
   end
 
   def handle_info({:transcription_submitted, _job_id}, socket) do
@@ -1297,13 +1417,18 @@ defmodule NoterWeb.SessionLive.Show do
     {:noreply,
      socket
      |> assign(:session, session)
+     |> assign(:upload_progress, nil)
      |> assign(:transcription_status, :queued)}
   end
 
   def handle_info({:transcription_submit_failed, reason}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
     {:noreply,
      socket
-     |> assign(:transcribing?, false)
+     |> assign(:session, session)
+     |> assign(:active_job, nil)
+     |> assign(:upload_progress, nil)
      |> put_flash(:error, "Failed to start transcription: #{reason}")}
   end
 
@@ -1333,7 +1458,7 @@ defmodule NoterWeb.SessionLive.Show do
     {:noreply,
      socket
      |> assign(:session, session)
-     |> assign(:transcribing?, false)
+     |> assign(:active_job, nil)
      |> assign(:transcription_progress, nil)
      |> assign_review_state(session)
      |> put_flash(:info, "Transcription complete.")}
@@ -1345,7 +1470,7 @@ defmodule NoterWeb.SessionLive.Show do
     {:noreply,
      socket
      |> assign(:session, session)
-     |> assign(:transcribing?, false)
+     |> assign(:active_job, nil)
      |> assign(:transcription_progress, nil)
      |> put_flash(:error, "Transcription failed: #{msg}")}
   end
@@ -1356,56 +1481,94 @@ defmodule NoterWeb.SessionLive.Show do
     {:noreply,
      socket
      |> assign(:session, session)
-     |> assign(:transcribing?, false)
+     |> assign(:active_job, nil)
      |> assign(:transcription_progress, nil)}
   end
 
+  def handle_info({:notes_progress, %{stage: :extracting} = progress}, socket) do
+    {:noreply, assign(socket, :notes_progress, progress)}
+  end
+
+  def handle_info({:notes_progress, %{stage: :complete}}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:active_job, nil)
+     |> assign(:notes_progress, nil)
+     |> put_flash(:info, "Notes generated successfully.")}
+  end
+
+  def handle_info({:notes_progress, %{stage: :error, error: reason}}, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:active_job, nil)
+     |> assign(:notes_progress, nil)
+     |> put_flash(:error, "Notes generation failed: #{reason}")}
+  end
+
   defp reconnect_transcription(socket, session) do
-    if session.status == "transcribing" and session.transcription_job_id do
-      Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
-
-      if SSEClient.running?(session.id) do
-        progress = SSEClient.get_progress(session.id)
-
+    cond do
+      # Upload to transcription service still in progress
+      session.status == "transcribing" and Jobs.running?(session.id, :transcription_submit) ->
         socket
-        |> assign(:transcribing?, true)
-        |> assign(:transcription_progress, progress)
-        |> assign(:transcription_status, :transcribing)
-      else
-        case Transcription.poll_job(session.transcription_job_id) do
-          {:ok, %{"status" => "done", "result" => result}} ->
-            Sessions.update_transcription(session, %{
-              status: "transcribed",
-              transcript_json: Jason.encode!(result)
-            })
+        |> assign(:active_job, :transcribing)
+        |> assign(:transcription_status, :uploading)
 
-            session = Sessions.get_session_with_campaign!(session.id)
-            assign(socket, :session, session)
+      # Transcription job submitted, check its status
+      session.status == "transcribing" and session.transcription_job_id != nil ->
+        Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
+        reconnect_transcription_job(socket, session)
 
-          {:ok, %{"status" => status}} when status in ~w(failed cancelled) ->
-            Sessions.update_transcription(session, %{status: "trimmed"})
-            session = Sessions.get_session_with_campaign!(session.id)
+      true ->
+        socket
+    end
+  end
 
-            socket
-            |> assign(:session, session)
-            |> put_flash(:error, "Transcription #{status}.")
+  defp reconnect_transcription_job(socket, session) do
+    if SSEClient.running?(session.id) do
+      progress = SSEClient.get_progress(session.id)
 
-          {:ok, _} ->
-            {:ok, _pid} =
-              DynamicSupervisor.start_child(
-                Noter.TranscriptionSupervisor,
-                {Noter.Transcription.SSEClient,
-                 session_id: session.id, job_id: session.transcription_job_id}
-              )
-
-            assign(socket, :transcribing?, true)
-
-          {:error, reason} ->
-            put_flash(socket, :error, "Failed to check transcription status: #{reason}")
-        end
-      end
-    else
       socket
+      |> assign(:active_job, :transcribing)
+      |> assign(:transcription_progress, progress)
+      |> assign(:transcription_status, :transcribing)
+    else
+      case Transcription.poll_job(session.transcription_job_id) do
+        {:ok, %{"status" => "done", "result" => result}} ->
+          Sessions.update_transcription(session, %{
+            status: "reviewing",
+            transcript_json: Jason.encode!(result)
+          })
+
+          session = Sessions.get_session_with_campaign!(session.id)
+          assign(socket, :session, session)
+
+        {:ok, %{"status" => status}} when status in ~w(failed cancelled) ->
+          Sessions.update_transcription(session, %{status: "trimming"})
+          session = Sessions.get_session_with_campaign!(session.id)
+
+          socket
+          |> assign(:session, session)
+          |> put_flash(:error, "Transcription #{status}.")
+
+        {:ok, _} ->
+          {:ok, _pid} =
+            DynamicSupervisor.start_child(
+              Noter.TranscriptionSupervisor,
+              {Noter.Transcription.SSEClient,
+               session_id: session.id, job_id: session.transcription_job_id}
+            )
+
+          assign(socket, :active_job, :transcribing)
+
+        {:error, reason} ->
+          put_flash(socket, :error, "Failed to check transcription status: #{reason}")
+      end
     end
   end
 
@@ -1414,9 +1577,9 @@ defmodule NoterWeb.SessionLive.Show do
     needs_pipeline? = is_nil(session.duration_seconds) or not socket.assigns.has_merged_audio?
     already_running? = Jobs.running?(session.id, :peaks)
 
-    if session.status == "uploaded" and needs_pipeline? and has_aac? and not already_running? do
+    if session.status == "trimming" and needs_pipeline? and has_aac? and not already_running? do
       Jobs.start_peaks(session)
-      assign(socket, :generating_peaks?, true)
+      assign(socket, :active_job, :peaks)
     else
       socket
     end
@@ -1430,7 +1593,7 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   defp assign_audio_urls(socket, session) do
-    if session.status in ~w(uploaded trimmed transcribing transcribed reviewing done) and
+    if session.status in ~w(trimming transcribing reviewing noting done) and
          session.duration_seconds do
       socket
       |> assign(:audio_url, ~p"/sessions/#{session.id}/audio/merged")
@@ -1442,7 +1605,7 @@ defmodule NoterWeb.SessionLive.Show do
     end
   end
 
-  defp assign_trim_files(socket, renamed_files, true) do
+  defp assign_trim_files(socket, renamed_files, true = _trimming?) do
     trim_files =
       Enum.sort(renamed_files)
       |> Enum.map(&{&1, 0})
@@ -1451,5 +1614,5 @@ defmodule NoterWeb.SessionLive.Show do
     assign(socket, :trim_files, trim_files)
   end
 
-  defp assign_trim_files(socket, _renamed_files, false), do: socket
+  defp assign_trim_files(socket, _renamed_files, false = _trimming?), do: socket
 end

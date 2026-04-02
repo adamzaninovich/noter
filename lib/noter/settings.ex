@@ -9,8 +9,14 @@ defmodule Noter.Settings do
 
   def get(key, default \\ nil) do
     case Repo.get_by(Setting, key: key) do
-      nil -> default
-      setting -> Jason.decode!(setting.value)
+      nil ->
+        default
+
+      setting ->
+        case Jason.decode!(setting.value) do
+          nil -> default
+          value -> value
+        end
     end
   end
 
