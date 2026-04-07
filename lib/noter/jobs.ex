@@ -76,10 +76,10 @@ defmodule Noter.Jobs do
            trim_end_seconds: end_seconds
          }) do
       {:ok, updated} ->
-        Uploads.cleanup_wav(session_id)
         broadcast(session_id, {:trim_complete, :ok, updated})
 
         # Auto-chain: start transcription after trim completes
+        # WAV cleanup is deferred until transcription is durably started
         start_transcription_submit(updated)
 
       {:error, changeset} ->
@@ -203,20 +203,7 @@ defmodule Noter.Jobs do
 
         case Noter.Transcription.submit_job(session_id, on_progress: on_progress) do
           {:ok, job_id} ->
-            session = Sessions.get_session!(session_id)
-
-            {:ok, updated} =
-              Sessions.update_transcription(session, %{
-                transcription_job_id: job_id
-              })
-
-            {:ok, _pid} =
-              DynamicSupervisor.start_child(
-                Noter.TranscriptionSupervisor,
-                {Noter.Transcription.SSEClient, session_id: updated.id, job_id: job_id}
-              )
-
-            broadcast(session_id, {:transcription_submitted, job_id})
+            finish_transcription_submit(session_id, job_id)
 
           {:error, reason} ->
             revert_to_trimming(session_id)
@@ -232,6 +219,39 @@ defmodule Noter.Jobs do
           broadcast(session_id, {:transcription_submit_failed, "unexpected error"})
       end
     end)
+  end
+
+  defp finish_transcription_submit(session_id, job_id) do
+    # Persist the job_id first — this is the point of no return.
+    # Once persisted, reconnect logic can find and reconcile the remote job.
+    session = Sessions.get_session!(session_id)
+
+    {:ok, updated} =
+      Sessions.update_transcription(session, %{transcription_job_id: job_id})
+
+    # WAV cleanup is safe now: trim source is no longer needed since
+    # the transcription job has the audio and the job_id is persisted.
+    Uploads.cleanup_wav(session_id)
+
+    try do
+      {:ok, _pid} =
+        DynamicSupervisor.start_child(
+          Noter.TranscriptionSupervisor,
+          {Noter.Transcription.SSEClient, session_id: updated.id, job_id: job_id}
+        )
+
+      broadcast(session_id, {:transcription_submitted, job_id})
+    rescue
+      e ->
+        Logger.error(
+          "SSE client start failed for session #{session_id}: #{Exception.message(e)}, " <>
+            "cancelling remote job #{job_id}"
+        )
+
+        Noter.Transcription.cancel_job(job_id)
+        revert_to_trimming(session_id)
+        broadcast(session_id, {:transcription_submit_failed, "unexpected error"})
+    end
   end
 
   def cancel_existing_transcription(session) do
