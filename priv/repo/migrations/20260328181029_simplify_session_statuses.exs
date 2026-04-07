@@ -3,7 +3,8 @@ defmodule Noter.Repo.Migrations.SimplifySessionStatuses do
 
   def up do
     # Map intermediate statuses to their simplified equivalents
-    execute "UPDATE sessions SET status = 'trimming' WHERE status IN ('uploaded', 'trimmed')"
+    execute "UPDATE sessions SET status = 'trimming' WHERE status = 'uploaded'"
+    execute "UPDATE sessions SET status = 'transcribing' WHERE status = 'trimmed'"
     execute "UPDATE sessions SET status = 'reviewing' WHERE status IN ('transcribed', 'reviewed')"
 
     alter table(:sessions) do
@@ -13,6 +14,7 @@ defmodule Noter.Repo.Migrations.SimplifySessionStatuses do
 
   def down do
     execute "UPDATE sessions SET status = 'uploaded' WHERE status = 'trimming'"
+    execute "UPDATE sessions SET status = 'trimmed' WHERE status = 'transcribing'"
     execute "UPDATE sessions SET status = 'transcribed' WHERE status = 'reviewing'"
     execute "UPDATE sessions SET status = 'reviewed' WHERE status = 'noting'"
 

@@ -1291,13 +1291,20 @@ defmodule NoterWeb.SessionLive.Show do
 
     case Sessions.update_session_notes(session, %{context: context_value, notes_error: nil}) do
       {:ok, session} ->
-        Jobs.start_notes_generation(session)
+        case Jobs.start_notes_generation(session) do
+          {:ok, _pid} ->
+            {:noreply,
+             socket
+             |> assign(:session, session)
+             |> assign(:active_job, :notes)
+             |> put_flash(:info, "Generating notes...")}
 
-        {:noreply,
-         socket
-         |> assign(:session, session)
-         |> assign(:active_job, :notes)
-         |> put_flash(:info, "Generating notes...")}
+          {:error, :already_running} ->
+            {:noreply,
+             socket
+             |> assign(:session, session)
+             |> assign(:active_job, :notes)}
+        end
 
       {:error, changeset} ->
         Logger.error("Failed to save context: #{inspect(changeset)}")
@@ -1523,6 +1530,14 @@ defmodule NoterWeb.SessionLive.Show do
       session.status == "transcribing" and session.transcription_job_id != nil ->
         Phoenix.PubSub.subscribe(Noter.PubSub, "transcription:#{session.id}")
         reconnect_transcription_job(socket, session)
+
+      # Status is transcribing but nothing is running and no job was submitted — restart
+      session.status == "transcribing" and session.transcription_job_id == nil ->
+        Jobs.start_transcription_submit(session)
+
+        socket
+        |> assign(:active_job, :transcribing)
+        |> assign(:transcription_status, :uploading)
 
       true ->
         socket
