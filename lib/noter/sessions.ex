@@ -200,14 +200,15 @@ defmodule Noter.Sessions do
   def finalize(%Session{}), do: {:error, :invalid_status}
 
   @doc """
-  Edit session: `done → reviewing` backward transition.
-  Clears session_notes, notes_error, and transcript_srt.
+  Edit session: `done|noting → reviewing` backward transition.
+  Clears notes_error and transcript_srt so the transcript will be re-finalized.
   """
-  def edit_session(%Session{status: "done"} = session) do
+  def edit_session(%Session{status: status} = session) when status in ~w(noting done) do
     session
     |> Session.notes_changeset(%{
       status: "reviewing",
-      notes_error: nil
+      notes_error: nil,
+      transcript_srt: nil
     })
     |> Repo.update()
     |> broadcast_session_update()

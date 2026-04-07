@@ -12,8 +12,9 @@ defmodule Noter.Repo.Migrations.SimplifySessionStatuses do
   end
 
   def down do
-    execute "UPDATE sessions SET status = 'trimmed' WHERE status = 'trimming'"
-    execute "UPDATE sessions SET status = 'reviewed' WHERE status = 'reviewing'"
+    execute "UPDATE sessions SET status = 'uploaded' WHERE status = 'trimming'"
+    execute "UPDATE sessions SET status = 'transcribed' WHERE status = 'reviewing'"
+    execute "UPDATE sessions SET status = 'reviewed' WHERE status = 'noting'"
 
     alter table(:sessions) do
       add :notes_status, :string

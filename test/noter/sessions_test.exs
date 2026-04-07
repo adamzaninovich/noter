@@ -288,12 +288,14 @@ defmodule Noter.SessionsTest do
       {:ok, session: session}
     end
 
-    test "transitions from done to reviewing and clears only notes_error", %{session: session} do
+    test "transitions from done to reviewing and clears notes_error and transcript_srt", %{
+      session: session
+    } do
       {:ok, updated} = Sessions.edit_session(session)
       assert updated.status == "reviewing"
       assert updated.notes_error == nil
       assert updated.session_notes == "some notes"
-      assert updated.transcript_srt == "some srt"
+      assert updated.transcript_srt == nil
     end
 
     test "rejects edit_session from non-done status" do

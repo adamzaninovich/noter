@@ -370,7 +370,7 @@ defmodule NoterWeb.SessionLive.Show do
                   Session Complete
                 </h2>
                 <button
-                  :if={@session.status == "done"}
+                  :if={@session.status in ~w(noting done) and @active_job != :notes}
                   id="edit-session-btn"
                   phx-click="edit_session"
                   class="btn btn-outline btn-sm shrink-0"

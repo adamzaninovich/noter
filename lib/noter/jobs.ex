@@ -55,14 +55,12 @@ defmodule Noter.Jobs do
         Logger.error("Trim failed for session #{session_id}: #{inspect(error)}")
         session = Sessions.get_session!(session_id)
 
-        case Sessions.update_session(session, %{status: "uploading"}) do
+        case Sessions.update_session(session, %{status: "trimming"}) do
           {:ok, _} ->
             :ok
 
           {:error, reason} ->
-            Logger.error(
-              "Failed to revert session #{session_id} to uploading: #{inspect(reason)}"
-            )
+            Logger.error("Failed to revert session #{session_id} to trimming: #{inspect(reason)}")
         end
 
         broadcast(session_id, {:trim_complete, error})
@@ -187,41 +185,51 @@ defmodule Noter.Jobs do
     broadcast(session_id, {:transcription_status_changed, "transcribing"})
 
     Task.Supervisor.start_child(@supervisor, fn ->
-      Registry.register(@registry, {session_id, :transcription_submit}, [])
+      try do
+        Registry.register(@registry, {session_id, :transcription_submit}, [])
 
-      last_broadcast = :atomics.new(1, signed: true)
-      :atomics.put(last_broadcast, 1, System.monotonic_time(:millisecond))
+        last_broadcast = :atomics.new(1, signed: true)
+        :atomics.put(last_broadcast, 1, System.monotonic_time(:millisecond))
 
-      on_progress = fn bytes_sent, total_bytes ->
-        now = System.monotonic_time(:millisecond)
-        last = :atomics.get(last_broadcast, 1)
+        on_progress = fn bytes_sent, total_bytes ->
+          now = System.monotonic_time(:millisecond)
+          last = :atomics.get(last_broadcast, 1)
 
-        if now - last > 250 or bytes_sent == total_bytes do
-          :atomics.put(last_broadcast, 1, now)
-          broadcast(session_id, {:upload_progress, bytes_sent, total_bytes})
+          if now - last > 250 or bytes_sent == total_bytes do
+            :atomics.put(last_broadcast, 1, now)
+            broadcast(session_id, {:upload_progress, bytes_sent, total_bytes})
+          end
         end
-      end
 
-      case Noter.Transcription.submit_job(session_id, on_progress: on_progress) do
-        {:ok, job_id} ->
-          session = Sessions.get_session!(session_id)
+        case Noter.Transcription.submit_job(session_id, on_progress: on_progress) do
+          {:ok, job_id} ->
+            session = Sessions.get_session!(session_id)
 
-          {:ok, updated} =
-            Sessions.update_transcription(session, %{
-              transcription_job_id: job_id
-            })
+            {:ok, updated} =
+              Sessions.update_transcription(session, %{
+                transcription_job_id: job_id
+              })
 
-          {:ok, _pid} =
-            DynamicSupervisor.start_child(
-              Noter.TranscriptionSupervisor,
-              {Noter.Transcription.SSEClient, session_id: updated.id, job_id: job_id}
-            )
+            {:ok, _pid} =
+              DynamicSupervisor.start_child(
+                Noter.TranscriptionSupervisor,
+                {Noter.Transcription.SSEClient, session_id: updated.id, job_id: job_id}
+              )
 
-          broadcast(session_id, {:transcription_submitted, job_id})
+            broadcast(session_id, {:transcription_submitted, job_id})
 
-        {:error, reason} ->
+          {:error, reason} ->
+            revert_to_trimming(session_id)
+            broadcast(session_id, {:transcription_submit_failed, reason})
+        end
+      rescue
+        e ->
+          Logger.error(
+            "Transcription submit crashed for session #{session_id}: #{Exception.message(e)}"
+          )
+
           revert_to_trimming(session_id)
-          broadcast(session_id, {:transcription_submit_failed, reason})
+          broadcast(session_id, {:transcription_submit_failed, "unexpected error"})
       end
     end)
   end

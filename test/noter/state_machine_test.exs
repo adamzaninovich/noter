@@ -81,7 +81,9 @@ defmodule Noter.StateMachineTest do
   end
 
   describe "backward transition: done → reviewing" do
-    test "edit_session clears only notes_error, preserves notes and srt", %{session: session} do
+    test "edit_session clears notes_error and transcript_srt, preserves notes", %{
+      session: session
+    } do
       {:ok, s} =
         Sessions.update_transcription(session, %{
           status: "reviewing",
@@ -103,7 +105,28 @@ defmodule Noter.StateMachineTest do
       assert reverted.status == "reviewing"
       assert reverted.notes_error == nil
       assert reverted.session_notes == "# Notes"
-      assert reverted.transcript_srt == "srt data"
+      assert reverted.transcript_srt == nil
+    end
+  end
+
+  describe "backward transition: noting → reviewing" do
+    test "edit_session from noting clears notes_error and transcript_srt", %{session: session} do
+      {:ok, s} =
+        Sessions.update_transcription(session, %{
+          status: "reviewing",
+          transcript_json: @transcript_json
+        })
+
+      {:ok, s} = Sessions.finalize(s)
+      assert s.status == "noting"
+
+      # Simulate a notes failure
+      {:ok, s} = Sessions.update_session_notes(s, %{notes_error: "LLM unavailable"})
+
+      {:ok, reverted} = Sessions.edit_session(s)
+      assert reverted.status == "reviewing"
+      assert reverted.notes_error == nil
+      assert reverted.transcript_srt == nil
     end
   end
 
@@ -112,7 +135,7 @@ defmodule Noter.StateMachineTest do
       assert {:error, :invalid_status} = Sessions.finalize(session)
     end
 
-    test "edit_session rejects non-done session", %{session: session} do
+    test "edit_session rejects non-noting/done session", %{session: session} do
       assert {:error, :invalid_status} = Sessions.edit_session(session)
     end
 
