@@ -81,7 +81,7 @@ defmodule Noter.StateMachineTest do
   end
 
   describe "backward transition: done → reviewing" do
-    test "edit_session clears notes, error, and srt", %{session: session} do
+    test "edit_session clears only notes_error, preserves notes and srt", %{session: session} do
       {:ok, s} =
         Sessions.update_transcription(session, %{
           status: "reviewing",
@@ -101,9 +101,9 @@ defmodule Noter.StateMachineTest do
 
       {:ok, reverted} = Sessions.edit_session(s)
       assert reverted.status == "reviewing"
-      assert reverted.session_notes == nil
       assert reverted.notes_error == nil
-      assert reverted.transcript_srt == nil
+      assert reverted.session_notes == "# Notes"
+      assert reverted.transcript_srt == "srt data"
     end
   end
 

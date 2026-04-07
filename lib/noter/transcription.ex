@@ -8,55 +8,63 @@ defmodule Noter.Transcription do
   def submit_job(session_id, opts \\ []) do
     on_progress = Keyword.get(opts, :on_progress, fn _bytes_sent, _total_bytes -> :ok end)
 
-    with {:ok, base} <- base_url() do
-      trimmed_dir = Path.join(Uploads.session_dir(session_id), "trimmed")
-      vocab_path = Path.join(Uploads.session_dir(session_id), "vocab.txt")
-
-      flac_files =
-        trimmed_dir
-        |> File.ls!()
-        |> Enum.filter(&String.ends_with?(&1, ".flac"))
-        |> Enum.sort()
-        |> Enum.map(fn name ->
-          path = Path.join(trimmed_dir, name)
-          {name, path, File.stat!(path).size, "audio/flac"}
-        end)
-
-      vocab_files =
-        if File.exists?(vocab_path) do
-          [{Path.basename(vocab_path), vocab_path, File.stat!(vocab_path).size, "text/plain"}]
-        else
-          []
-        end
-
-      all_files = flac_files ++ vocab_files
-      total_bytes = Enum.reduce(all_files, 0, fn {_, _, size, _}, acc -> acc + size end)
-      counter = :counters.new(1, [:atomics])
-
-      fields =
-        Enum.map(all_files, fn {name, path, size, content_type} ->
-          stream =
-            File.stream!(path, 256_000)
-            |> Stream.each(fn chunk ->
-              chunk_size = IO.iodata_length(chunk)
-              :counters.add(counter, 1, chunk_size)
-              on_progress.(:counters.get(counter, 1), total_bytes)
+    with {:ok, base} <- base_url(),
+         {:ok, trimmed_dir} <- get_session_dir(session_id, "trimmed"),
+         {:ok, vocab_path} <- get_vocab_path(session_id) do
+      case File.ls(trimmed_dir) do
+        {:ok, filenames} ->
+          flac_files =
+            filenames
+            |> Enum.filter(&String.ends_with?(&1, ".flac"))
+            |> Enum.sort()
+            |> Enum.map(fn name ->
+              path = Path.join(trimmed_dir, name)
+              {:ok, %{size: size}} = File.stat(path)
+              {name, path, size, "audio/flac"}
             end)
 
-          {"files[]", {stream, filename: name, content_type: content_type, size: size}}
-        end)
+          vocab_files =
+            if File.exists?(vocab_path) do
+              {:ok, %{size: size}} = File.stat(vocab_path)
+              [{Path.basename(vocab_path), vocab_path, size, "text/plain"}]
+            else
+              []
+            end
 
-      url = base <> "/jobs"
+          all_files = flac_files ++ vocab_files
+          total_bytes = Enum.reduce(all_files, 0, fn {_, _, size, _}, acc -> acc + size end)
+          counter = :counters.new(1, [:atomics])
 
-      case Req.post(url, form_multipart: fields, receive_timeout: 600_000) do
-        {:ok, %{status: status, body: %{"job_id" => job_id}}} when status in 200..299 ->
-          {:ok, job_id}
+          fields =
+            Enum.map(all_files, fn {name, path, size, content_type} ->
+              {:ok, stream} = {:ok, File.stream!(path, 256_000)}
 
-        {:ok, %{body: body}} ->
-          {:error, "Transcription API error: #{inspect(body)}"}
+              stream =
+                stream
+                |> Stream.each(fn chunk ->
+                  chunk_size = IO.iodata_length(chunk)
+                  :counters.add(counter, 1, chunk_size)
+                  on_progress.(:counters.get(counter, 1), total_bytes)
+                end)
+
+              {"files[]", {stream, filename: name, content_type: content_type, size: size}}
+            end)
+
+          url = base <> "/jobs"
+
+          case Req.post(url, form_multipart: fields, receive_timeout: 600_000) do
+            {:ok, %{status: status, body: %{"job_id" => job_id}}} when status in 200..299 ->
+              {:ok, job_id}
+
+            {:ok, %{body: body}} ->
+              {:error, "Transcription API error: #{inspect(body)}"}
+
+            {:error, reason} ->
+              {:error, "Transcription API request failed: #{inspect(reason)}"}
+          end
 
         {:error, reason} ->
-          {:error, "Transcription API request failed: #{inspect(reason)}"}
+          {:error, "Failed to read trimmed directory: #{inspect(reason)}"}
       end
     end
   end
@@ -108,5 +116,15 @@ defmodule Noter.Transcription do
       "" -> {:error, :not_configured}
       url -> {:ok, url}
     end
+  end
+
+  defp get_session_dir(session_id, subdir) do
+    path = Path.join(Uploads.session_dir(session_id), subdir)
+    {:ok, path}
+  end
+
+  defp get_vocab_path(session_id) do
+    path = Path.join(Uploads.session_dir(session_id), "vocab.txt")
+    {:ok, path}
   end
 end

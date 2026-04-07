@@ -207,9 +207,7 @@ defmodule Noter.Sessions do
     session
     |> Session.notes_changeset(%{
       status: "reviewing",
-      session_notes: nil,
-      notes_error: nil,
-      transcript_srt: nil
+      notes_error: nil
     })
     |> Repo.update()
     |> broadcast_session_update()

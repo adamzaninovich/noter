@@ -220,16 +220,7 @@ defmodule Noter.Jobs do
           broadcast(session_id, {:transcription_submitted, job_id})
 
         {:error, reason} ->
-          session = Sessions.get_session!(session_id)
-
-          case Sessions.update_session(session, %{status: "trimming"}) do
-            {:ok, _} ->
-              :ok
-
-            {:error, err} ->
-              Logger.error("Failed to revert session #{session_id} to trimming: #{inspect(err)}")
-          end
-
+          revert_to_trimming(session_id)
           broadcast(session_id, {:transcription_submit_failed, reason})
       end
     end)
@@ -260,6 +251,16 @@ defmodule Noter.Jobs do
     case Registry.lookup(Noter.TranscriptionRegistry, session_id) do
       [{pid, _}] -> GenServer.stop(pid, :normal)
       [] -> :ok
+    end
+  end
+
+  defp revert_to_trimming(session_id) do
+    case Sessions.update_session(Sessions.get_session!(session_id), %{status: "trimming"}) do
+      {:ok, _} ->
+        :ok
+
+      {:error, err} ->
+        Logger.error("Failed to revert session #{session_id} to trimming: #{inspect(err)}")
     end
   end
 
