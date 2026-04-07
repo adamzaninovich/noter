@@ -4,6 +4,8 @@ defmodule Noter.LLM.Structured do
   Appends schema instructions to the system prompt and retries on parse failure.
   """
 
+  require Logger
+
   alias Noter.LLM.Client
 
   @max_retries 2
@@ -31,7 +33,12 @@ defmodule Noter.LLM.Structured do
           {:ok, parsed} ->
             {:ok, parsed}
 
-          {:error, _} ->
+          {:error, decode_error} ->
+            Logger.warning(
+              "Structured fallback: JSON decode failed on attempt #{attempts + 1}, " <>
+                "error=#{inspect(decode_error)}, content=#{inspect(String.slice(content, 0..500))}"
+            )
+
             retry_messages =
               messages ++
                 [

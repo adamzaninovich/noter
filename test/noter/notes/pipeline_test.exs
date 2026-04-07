@@ -42,7 +42,7 @@ defmodule Noter.Notes.PipelineTest do
 
     {:ok, session} =
       Sessions.update_transcription(session, %{
-        status: "transcribed",
+        status: "reviewing",
         transcript_json: Map.get(attrs, :transcript_json, @transcript_json),
         transcription_job_id: "job_123"
       })
@@ -74,6 +74,7 @@ defmodule Noter.Notes.PipelineTest do
     }
   end
 
+  # Extraction has response_format (json_schema), writing does not
   defp dual_plug(extraction_response, writing_response) do
     fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -98,33 +99,18 @@ defmodule Noter.Notes.PipelineTest do
 
       updated = Sessions.get_session!(session.id)
       assert updated.status == "done"
-      assert updated.notes_status == "complete"
       assert updated.session_notes == @notes_markdown
     end
 
-    test "sets notes_status to running before making LLM calls" do
+    test "session must be in noting status" do
       session = setup_session()
       setup_llm_settings()
-      test_pid = self()
 
-      plug = fn conn ->
-        {:ok, body, conn} = Plug.Conn.read_body(conn)
-        decoded = Jason.decode!(body)
-
-        if Map.has_key?(decoded, "response_format") do
-          current = Sessions.get_session!(session.id)
-          send(test_pid, {:status_during_extraction, current.notes_status})
-          Req.Test.json(conn, chat_response(Jason.encode!(@valid_facts)))
-        else
-          Req.Test.json(conn, chat_response(@notes_markdown))
-        end
-      end
-
-      Pipeline.run(session.id, plug: plug)
-      assert_received {:status_during_extraction, "running"}
+      # Verify the session is in noting status after finalize
+      assert session.status == "noting"
     end
 
-    test "extraction failure sets error state" do
+    test "extraction failure stays on noting" do
       session = setup_session()
       setup_llm_settings()
 
@@ -137,12 +123,11 @@ defmodule Noter.Notes.PipelineTest do
       assert {:error, _} = Pipeline.run(session.id, plug: plug)
 
       updated = Sessions.get_session!(session.id)
-      assert updated.notes_status == "error"
       assert updated.notes_error =~ "Extraction failed"
-      assert updated.status == "reviewed"
+      assert updated.status == "noting"
     end
 
-    test "writing failure sets error state" do
+    test "writing failure stays on noting" do
       session = setup_session()
       setup_llm_settings()
 
@@ -162,19 +147,16 @@ defmodule Noter.Notes.PipelineTest do
       assert {:error, _} = Pipeline.run(session.id, plug: plug)
 
       updated = Sessions.get_session!(session.id)
-      assert updated.notes_status == "error"
       assert updated.notes_error =~ "API error 500"
+      assert updated.status == "noting"
     end
 
-    test "returns error for non-finalized session" do
+    test "returns error for non-noting session" do
       {:ok, campaign} = Campaigns.create_campaign(%{name: "Test Campaign", player_map: %{}})
       {:ok, session} = Sessions.create_session(campaign, %{name: "Test Session"})
 
       assert {:error, reason} = Pipeline.run(session.id)
-      assert reason =~ "not finalized"
-
-      updated = Sessions.get_session!(session.id)
-      assert updated.notes_status == "error"
+      assert reason =~ "not in noting status"
     end
 
     test "broadcasts progress events during extraction" do
@@ -246,7 +228,7 @@ defmodule Noter.Notes.PipelineTest do
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5000
 
       updated = Sessions.get_session!(session.id)
-      assert updated.notes_status == "complete"
+      assert updated.status == "done"
     end
 
     test "returns {:error, :already_running} when notes job is in progress" do

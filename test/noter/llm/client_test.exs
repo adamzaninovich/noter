@@ -131,14 +131,17 @@ defmodule Noter.LLM.ClientTest do
     test "falls back to structured on invalid JSON response" do
       setup_settings(:extraction)
 
+      call_count = :counters.new(1, [])
+
       plug =
         plug_for(fn conn ->
-          {:ok, body, conn} = Plug.Conn.read_body(conn)
-          decoded = Jason.decode!(body)
+          :counters.add(call_count, 1, 1)
+          count = :counters.get(call_count, 1)
 
-          if Map.has_key?(decoded, "response_format") do
+          if count == 1 do
             Req.Test.json(conn, chat_response("not valid json {{{"))
           else
+            # Structured fallback uses chat completions
             Req.Test.json(conn, chat_response(Jason.encode!(%{"name" => "fallback"})))
           end
         end)
@@ -147,7 +150,7 @@ defmodule Noter.LLM.ClientTest do
                Client.chat_json(:extraction, @messages, @schema, plug: plug)
     end
 
-    test "includes response_format in request body" do
+    test "uses Chat Completions format with json_schema" do
       setup_settings(:extraction)
 
       plug =
@@ -156,10 +159,47 @@ defmodule Noter.LLM.ClientTest do
           decoded = Jason.decode!(body)
           assert decoded["response_format"]["type"] == "json_schema"
           assert decoded["response_format"]["json_schema"]["strict"] == true
+          assert decoded["response_format"]["json_schema"]["schema"] == @schema
+          assert decoded["chat_template_kwargs"]["enable_thinking"] == false
+          assert is_list(decoded["messages"])
           Req.Test.json(conn, chat_response(Jason.encode!(%{"name" => "ok"})))
         end)
 
       assert {:ok, _} = Client.chat_json(:extraction, @messages, @schema, plug: plug)
+    end
+
+    test "strips markdown fences from response" do
+      setup_settings(:extraction)
+
+      plug =
+        plug_for(fn conn ->
+          Req.Test.json(conn, chat_response(~s|```json\n{"name": "fenced"}\n```|))
+        end)
+
+      assert {:ok, %{"name" => "fenced"}} =
+               Client.chat_json(:extraction, @messages, @schema, plug: plug)
+    end
+
+    test "falls back to reasoning_content when content is empty" do
+      setup_settings(:extraction)
+
+      plug =
+        plug_for(fn conn ->
+          Req.Test.json(conn, %{
+            "choices" => [
+              %{
+                "message" => %{
+                  "role" => "assistant",
+                  "content" => "",
+                  "reasoning_content" => Jason.encode!(%{"name" => "from_reasoning"})
+                }
+              }
+            ]
+          })
+        end)
+
+      assert {:ok, %{"name" => "from_reasoning"}} =
+               Client.chat_json(:extraction, @messages, @schema, plug: plug)
     end
   end
 
