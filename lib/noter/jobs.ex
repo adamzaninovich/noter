@@ -317,13 +317,13 @@ defmodule Noter.Jobs do
     if running?(session_id, :notes) do
       {:error, :already_running}
     else
-      {:ok, _pid} =
-        DynamicSupervisor.start_child(
-          Noter.NotesSupervisor,
-          {Runner, session_id: session_id, pipeline_opts: opts}
-        )
-
-      {:ok, :started}
+      case DynamicSupervisor.start_child(
+             Noter.NotesSupervisor,
+             {Runner, session_id: session_id, pipeline_opts: opts}
+           ) do
+        {:ok, _pid} -> {:ok, :started}
+        {:error, {:already_started, _pid}} -> {:error, :already_running}
+      end
     end
   end
 end

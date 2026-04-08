@@ -56,6 +56,7 @@ defmodule Noter.Notes.Runner do
     {:noreply, %{state | progress: progress}}
   end
 
+  @impl true
   def handle_info({:extraction_started, total}, state) do
     chunks = Enum.map(0..(total - 1), &%{index: &1, status: :pending})
 
@@ -71,6 +72,7 @@ defmodule Noter.Notes.Runner do
     {:noreply, %{state | progress: progress}}
   end
 
+  @impl true
   def handle_info({:chunk_started, index}, state) do
     chunks = update_chunk_status(state.progress.chunks, index, :in_progress)
     in_progress = state.progress.in_progress + 1
@@ -81,6 +83,7 @@ defmodule Noter.Notes.Runner do
     {:noreply, %{state | progress: progress}}
   end
 
+  @impl true
   def handle_info({:chunk_done, index}, state) do
     chunks = update_chunk_status(state.progress.chunks, index, :done)
     completed = state.progress.completed + 1
@@ -92,6 +95,7 @@ defmodule Noter.Notes.Runner do
     {:noreply, %{state | progress: progress}}
   end
 
+  @impl true
   def handle_info(:writing_started, state) do
     progress = %{stage: :writing}
 
@@ -99,11 +103,13 @@ defmodule Noter.Notes.Runner do
     {:noreply, %{state | progress: progress}}
   end
 
+  @impl true
   def handle_info({ref, _result}, %{task_ref: ref} = state) do
     Process.demonitor(ref, [:flush])
     {:stop, :normal, state}
   end
 
+  @impl true
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task_ref: ref} = state) do
     if reason != :normal do
       Logger.error(
@@ -114,6 +120,7 @@ defmodule Noter.Notes.Runner do
     {:stop, :normal, state}
   end
 
+  @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
   end

@@ -99,7 +99,7 @@ defmodule Noter.LLM.Client do
 
     case Req.request(req_opts) do
       {:ok, %{status: 200, body: body}} ->
-        Logger.info(
+        Logger.debug(
           "LLM #{config.role} raw response: #{inspect(body, limit: :infinity, printable_limit: :infinity)}"
         )
 
@@ -134,20 +134,17 @@ defmodule Noter.LLM.Client do
     end
   end
 
-  defp find_first_brace(string, brace) do
-    case Regex.run(~r/#{brace}/, string, return: :index) do
-      [{pos, _} | _] -> {:ok, pos}
-      nil -> :error
+  defp find_first_brace(string, char) do
+    case :binary.match(string, char) do
+      {pos, _} -> {:ok, pos}
+      :nomatch -> :error
     end
   end
 
-  defp find_last_brace(string, brace) do
-    Regex.scan(~r/#{brace}/, string, return: :index)
-    |> Enum.map(fn [{pos, _}] -> pos end)
-    |> List.last()
-    |> case do
-      nil -> :error
-      pos -> {:ok, pos}
+  defp find_last_brace(string, char) do
+    case :binary.matches(string, char) do
+      [] -> :error
+      matches -> {:ok, matches |> List.last() |> elem(0)}
     end
   end
 
@@ -233,7 +230,7 @@ defmodule Noter.LLM.Client do
 
     case Req.request(req_opts) do
       {:ok, %{status: 200, body: body}} ->
-        Logger.info(
+        Logger.debug(
           "LLM #{config.role} raw response: #{inspect(body, limit: :infinity, printable_limit: :infinity)}"
         )
 

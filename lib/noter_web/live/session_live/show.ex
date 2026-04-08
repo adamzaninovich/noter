@@ -1023,7 +1023,7 @@ defmodule NoterWeb.SessionLive.Show do
 
   defp render_markdown(markdown) do
     markdown
-    |> MDEx.to_html!()
+    |> MDEx.to_html!(sanitize: MDEx.Document.default_sanitize_options())
     |> Phoenix.HTML.raw()
   end
 
