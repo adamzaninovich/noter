@@ -307,6 +307,13 @@ defmodule Noter.Jobs do
     Phoenix.PubSub.subscribe(@pubsub, upload_topic(campaign_id))
   end
 
+  def get_notes_progress(session_id) do
+    case Registry.lookup(@registry, {session_id, :notes}) do
+      [{_pid, {:notes_progress, %{stage: :extracting} = progress}}] -> progress
+      _ -> nil
+    end
+  end
+
   def start_notes_generation(session, opts \\ []) do
     session_id = session.id
 

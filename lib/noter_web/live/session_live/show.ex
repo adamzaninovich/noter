@@ -57,6 +57,7 @@ defmodule NoterWeb.SessionLive.Show do
         socket
         |> retry_peaks_if_needed(session)
         |> reconnect_transcription(session)
+        |> reconnect_notes_progress(session)
         |> assign_review_state(session)
       else
         assign_review_state_defaults(socket, session)
@@ -418,6 +419,21 @@ defmodule NoterWeb.SessionLive.Show do
             </div>
           </div>
         <% end %>
+
+        <%!-- Notes card --%>
+        <div
+          :if={@session.status == "done" and @session.session_notes}
+          class="card bg-base-200 shadow-sm"
+        >
+          <div class="card-body">
+            <h2 class="card-title text-lg">
+              <.icon name="hero-document-text" class="size-5" /> Session Notes
+            </h2>
+            <div class="prose prose-sm max-w-none mt-2">
+              {render_markdown(@session.session_notes)}
+            </div>
+          </div>
+        </div>
 
         <%!-- Transcript review skeleton --%>
         <%= if @reviewing? and not @review_loaded? do %>
@@ -965,6 +981,12 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   @status_order ~w(uploading trimming transcribing reviewing noting done)
+
+  defp render_markdown(markdown) do
+    markdown
+    |> MDEx.to_html!()
+    |> Phoenix.HTML.raw()
+  end
 
   defp step_complete?(current_status, step_status) do
     current_idx = Enum.find_index(@status_order, &(&1 == current_status)) || 0
@@ -1516,6 +1538,14 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:active_job, nil)
      |> assign(:notes_progress, nil)
      |> put_flash(:error, "Notes generation failed: #{reason}")}
+  end
+
+  defp reconnect_notes_progress(socket, session) do
+    if session.status == "noting" do
+      assign(socket, :notes_progress, Jobs.get_notes_progress(session.id))
+    else
+      socket
+    end
   end
 
   defp reconnect_transcription(socket, session) do

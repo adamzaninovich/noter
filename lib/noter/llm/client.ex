@@ -66,7 +66,6 @@ defmodule Noter.LLM.Client do
       %{
         model: config.model,
         messages: messages,
-        chat_template_kwargs: %{enable_thinking: false},
         response_format: %{
           type: "json_schema",
           json_schema: %{name: "response", strict: true, schema: json_schema}

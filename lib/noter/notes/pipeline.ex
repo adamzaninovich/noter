@@ -13,6 +13,7 @@ defmodule Noter.Notes.Pipeline do
   alias Noter.Transcription.Transcript
 
   @pubsub Noter.PubSub
+  @registry Noter.JobRegistry
 
   @doc """
   Runs the full pipeline for the given session_id.
@@ -139,6 +140,7 @@ defmodule Noter.Notes.Pipeline do
   end
 
   defp broadcast(session_id, message) do
+    Registry.update_value(@registry, {session_id, :notes}, fn _ -> message end)
     Phoenix.PubSub.broadcast(@pubsub, "session:#{session_id}:jobs", message)
   end
 end
