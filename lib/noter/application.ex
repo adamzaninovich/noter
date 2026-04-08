@@ -22,6 +22,7 @@ defmodule Noter.Application do
       {Registry, keys: :unique, name: Noter.TranscriptionRegistry},
       {DynamicSupervisor, name: Noter.TranscriptionSupervisor, strategy: :one_for_one},
       {Registry, keys: :unique, name: Noter.JobRegistry},
+      {DynamicSupervisor, name: Noter.NotesSupervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Noter.JobSupervisor},
       # Start to serve requests, typically the last entry
       NoterWeb.Endpoint

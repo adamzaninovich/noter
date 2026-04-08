@@ -6,7 +6,7 @@ defmodule Noter.Jobs do
 
   require Logger
 
-  alias Noter.Notes.Pipeline, as: NotesPipeline
+  alias Noter.Notes.Runner
   alias Noter.{Sessions, Uploads}
 
   @registry Noter.JobRegistry
@@ -308,10 +308,7 @@ defmodule Noter.Jobs do
   end
 
   def get_notes_progress(session_id) do
-    case Registry.lookup(@registry, {session_id, :notes}) do
-      [{_pid, {:notes_progress, %{stage: :extracting} = progress}}] -> progress
-      _ -> nil
-    end
+    Runner.get_progress(session_id)
   end
 
   def start_notes_generation(session, opts \\ []) do
@@ -320,13 +317,13 @@ defmodule Noter.Jobs do
     if running?(session_id, :notes) do
       {:error, :already_running}
     else
-      {:ok, pid} =
-        Task.Supervisor.start_child(@supervisor, fn ->
-          Registry.register(@registry, {session_id, :notes}, [])
-          NotesPipeline.run(session_id, opts)
-        end)
+      {:ok, _pid} =
+        DynamicSupervisor.start_child(
+          Noter.NotesSupervisor,
+          {Runner, session_id: session_id, pipeline_opts: opts}
+        )
 
-      {:ok, pid}
+      {:ok, :started}
     end
   end
 end

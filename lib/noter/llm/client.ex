@@ -19,8 +19,11 @@ defmodule Noter.LLM.Client do
         |> put_if("max_tokens", config.max_tokens)
 
       case do_request(config, body, opts) do
-        {:ok, content} -> {:ok, content}
-        {:error, reason} -> {:error, format_error(reason)}
+        {:ok, content} ->
+          {:ok, content}
+
+        {:error, reason} ->
+          {:error, format_error(reason)}
       end
     end
   end
@@ -29,17 +32,26 @@ defmodule Noter.LLM.Client do
     with {:ok, config} <- load_config(role) do
       case do_chat_json_request(config, messages, json_schema, opts) do
         {:ok, content} ->
-          content
-          |> strip_markdown_fences()
-          |> Jason.decode()
-          |> case do
-            {:ok, parsed} -> {:ok, parsed}
-            {:error, _} -> structured_fallback(role, messages, json_schema, content, opts)
+          case parse_json(content) do
+            {:ok, parsed} ->
+              {:ok, parsed}
+
+            {:error, decode_error} ->
+              stripped = strip_to_json(content)
+
+              Logger.error(
+                "LLM returned unparseable JSON after stripping. " <>
+                  "raw_content=#{inspect(content, limit: :infinity, printable_limit: :infinity)} " <>
+                  "stripped=#{inspect(stripped)} " <>
+                  "error=#{inspect(decode_error)}"
+              )
+
+              structured_fallback(role, messages, json_schema, content, opts)
           end
 
         {:error, {:api_error, status, body}} when status in [400, 404, 422, 500] ->
-          Logger.warning(
-            "Chat Completions JSON failed (HTTP #{status}): #{inspect(body)}, using structured fallback"
+          Logger.error(
+            "LLM API error (HTTP #{status}): #{inspect(body)}. Using structured fallback."
           )
 
           Structured.call(role, messages, json_schema, opts)
@@ -51,9 +63,9 @@ defmodule Noter.LLM.Client do
   end
 
   defp structured_fallback(role, messages, json_schema, original_content, opts) do
-    Logger.warning(
-      "Chat Completions returned unparseable JSON, using structured fallback: " <>
-        inspect(String.slice(original_content, 0..200))
+    Logger.error(
+      "Using structured fallback after initial parse failure. " <>
+        "original_content=#{inspect(original_content, limit: :infinity, printable_limit: :infinity)}"
     )
 
     Structured.call(role, messages, json_schema, opts)
@@ -86,7 +98,12 @@ defmodule Noter.LLM.Client do
       |> maybe_put_plug(opts)
 
     case Req.request(req_opts) do
-      {:ok, %{status: 200, body: %{"choices" => [%{"message" => message} | _]}}} ->
+      {:ok, %{status: 200, body: body}} ->
+        Logger.info(
+          "LLM #{config.role} raw response: #{inspect(body, limit: :infinity, printable_limit: :infinity)}"
+        )
+
+        message = get_in(body, ["choices", Access.at(0), "message"])
         extract_content(message)
 
       {:ok, %{status: status, body: body}} ->
@@ -105,16 +122,41 @@ defmodule Noter.LLM.Client do
     end
   end
 
-  defp strip_markdown_fences(content) do
-    content = String.trim(content)
+  defp strip_to_json(content) do
+    trimmed = String.trim(content)
 
-    if String.starts_with?(content, "```") do
-      content
-      |> String.replace(~r/\A```(?:json)?\n?/, "")
-      |> String.replace(~r/\n?```\z/, "")
-      |> String.trim()
+    with {:ok, first_pos} <- find_first_brace(trimmed, "{"),
+         {:ok, last_pos} <- find_last_brace(trimmed, "}"),
+         true <- last_pos > first_pos do
+      String.slice(trimmed, first_pos..last_pos)
     else
-      content
+      _ -> trimmed
+    end
+  end
+
+  defp find_first_brace(string, brace) do
+    case Regex.run(~r/#{brace}/, string, return: :index) do
+      [{pos, _} | _] -> {:ok, pos}
+      nil -> :error
+    end
+  end
+
+  defp find_last_brace(string, brace) do
+    Regex.scan(~r/#{brace}/, string, return: :index)
+    |> Enum.map(fn [{pos, _}] -> pos end)
+    |> List.last()
+    |> case do
+      nil -> :error
+      pos -> {:ok, pos}
+    end
+  end
+
+  def parse_json(content) do
+    stripped = strip_to_json(content)
+
+    case Jason.decode(stripped) do
+      {:ok, parsed} -> {:ok, parsed}
+      {:error, error} -> {:error, error}
     end
   end
 
@@ -190,7 +232,13 @@ defmodule Noter.LLM.Client do
       |> maybe_put_plug(opts)
 
     case Req.request(req_opts) do
-      {:ok, %{status: 200, body: %{"choices" => [%{"message" => %{"content" => content}} | _]}}} ->
+      {:ok, %{status: 200, body: body}} ->
+        Logger.info(
+          "LLM #{config.role} raw response: #{inspect(body, limit: :infinity, printable_limit: :infinity)}"
+        )
+
+        message = get_in(body, ["choices", Access.at(0), "message"])
+        content = message && Map.get(message, "content")
         {:ok, content}
 
       {:ok, %{status: status, body: body}} ->
