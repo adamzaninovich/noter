@@ -57,6 +57,7 @@ defmodule NoterWeb.SessionLive.Show do
         socket
         |> retry_peaks_if_needed(session)
         |> reconnect_transcription(session)
+        |> reconnect_notes_progress(session)
         |> assign_review_state(session)
       else
         assign_review_state_defaults(socket, session)
@@ -321,14 +322,53 @@ defmodule NoterWeb.SessionLive.Show do
         <div :if={@session.status == "noting" and @review_loaded?} class="card bg-base-200 shadow-sm">
           <div class="card-body">
             <%= if @active_job == :notes do %>
-              <div class="flex flex-col items-center py-8 gap-4">
+              <div :if={@notes_progress && @notes_progress.stage == :extracting}>
+                <div class="space-y-3">
+                  <div class="flex items-center justify-between text-sm">
+                    <span class="font-medium">Extracting facts...</span>
+                    <span class="text-base-content/60">
+                      {@notes_progress.completed} done · {@notes_progress.in_progress} in progress
+                    </span>
+                  </div>
+
+                  <div class="flex flex-wrap gap-1">
+                    <div
+                      :for={chunk <- @notes_progress.chunks}
+                      class="flex items-center justify-center"
+                    >
+                      <div class="badge badge-sm h-7 w-7 rounded-full justify-center">
+                        <%= case chunk.status do %>
+                          <% :done -> %>
+                            <.icon name="hero-check" class="size-3 text-success" />
+                          <% :in_progress -> %>
+                            <span class="loading loading-spinner loading-xs text-primary"></span>
+                          <% :pending -> %>
+                            <span class="text-base-content/30 text-xs">{chunk.index + 1}</span>
+                        <% end %>
+                      </div>
+                    </div>
+                  </div>
+
+                  <progress
+                    class="progress progress-primary w-full"
+                    value={@notes_progress.completed}
+                    max={@notes_progress.total}
+                  >
+                  </progress>
+                </div>
+              </div>
+
+              <div
+                :if={@notes_progress && @notes_progress.stage == :writing}
+                class="flex flex-col items-center py-6 gap-3"
+              >
                 <span class="loading loading-spinner loading-lg text-primary"></span>
-                <p :if={@notes_progress} class="text-base-content/70">
-                  Extracting facts... ({@notes_progress.completed}/{@notes_progress.total} chunks)
-                </p>
-                <p :if={is_nil(@notes_progress)} class="text-base-content/70">
-                  Generating notes...
-                </p>
+                <p class="text-sm text-base-content/70">Composing notes...</p>
+              </div>
+
+              <div :if={is_nil(@notes_progress)} class="flex flex-col items-center py-8 gap-4">
+                <span class="loading loading-spinner loading-lg text-primary"></span>
+                <p class="text-sm text-base-content/70">Preparing extraction...</p>
               </div>
             <% else %>
               <h2 class="card-title text-lg">
@@ -418,6 +458,21 @@ defmodule NoterWeb.SessionLive.Show do
             </div>
           </div>
         <% end %>
+
+        <%!-- Notes card --%>
+        <div
+          :if={@session.status == "done" and @session.session_notes}
+          class="card bg-base-200 shadow-sm"
+        >
+          <div class="card-body">
+            <h2 class="card-title text-lg">
+              <.icon name="hero-document-text" class="size-5" /> Session Notes
+            </h2>
+            <div class="prose prose-sm max-w-none mt-2">
+              {render_markdown(@session.session_notes)}
+            </div>
+          </div>
+        </div>
 
         <%!-- Transcript review skeleton --%>
         <%= if @reviewing? and not @review_loaded? do %>
@@ -966,6 +1021,12 @@ defmodule NoterWeb.SessionLive.Show do
 
   @status_order ~w(uploading trimming transcribing reviewing noting done)
 
+  defp render_markdown(markdown) do
+    markdown
+    |> MDEx.to_html!(sanitize: MDEx.Document.default_sanitize_options())
+    |> Phoenix.HTML.raw()
+  end
+
   defp step_complete?(current_status, step_status) do
     current_idx = Enum.find_index(@status_order, &(&1 == current_status)) || 0
     step_idx = Enum.find_index(@status_order, &(&1 == step_status)) || 0
@@ -1492,6 +1553,10 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:transcription_progress, nil)}
   end
 
+  def handle_info({:notes_progress, %{stage: :writing} = progress}, socket) do
+    {:noreply, assign(socket, :notes_progress, progress)}
+  end
+
   def handle_info({:notes_progress, %{stage: :extracting} = progress}, socket) do
     {:noreply, assign(socket, :notes_progress, progress)}
   end
@@ -1516,6 +1581,14 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:active_job, nil)
      |> assign(:notes_progress, nil)
      |> put_flash(:error, "Notes generation failed: #{reason}")}
+  end
+
+  defp reconnect_notes_progress(socket, session) do
+    if session.status == "noting" do
+      assign(socket, :notes_progress, Jobs.get_notes_progress(session.id))
+    else
+      socket
+    end
   end
 
   defp reconnect_transcription(socket, session) do

@@ -41,6 +41,29 @@ defmodule NoterWeb.SessionLive.ShowTest do
     assert has_element?(view, "a", campaign.name)
   end
 
+  test "sanitizes script tags in rendered session notes", %{
+    conn: conn,
+    campaign: campaign,
+    session: session
+  } do
+    malicious_notes = "# Hello\n\n<script>alert('xss')</script>\n\nSafe content"
+
+    {:ok, _} =
+      Sessions.update_session_notes(session, %{
+        status: "done",
+        session_notes: malicious_notes
+      })
+
+    {:ok, view, _html} =
+      live(conn, ~p"/campaigns/#{campaign.slug}/sessions/#{session.slug}")
+
+    notes_html = element(view, ".prose") |> render()
+    refute notes_html =~ "<script>"
+    refute notes_html =~ "alert('xss')"
+    assert notes_html =~ "Safe content"
+    assert notes_html =~ "Hello"
+  end
+
   test "displays renamed files when present", %{conn: conn, campaign: campaign, session: session} do
     # Create some renamed files
     renamed_dir = Path.join(Uploads.session_dir(session.id), "renamed")

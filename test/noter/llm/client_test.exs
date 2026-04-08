@@ -160,7 +160,7 @@ defmodule Noter.LLM.ClientTest do
           assert decoded["response_format"]["type"] == "json_schema"
           assert decoded["response_format"]["json_schema"]["strict"] == true
           assert decoded["response_format"]["json_schema"]["schema"] == @schema
-          assert decoded["chat_template_kwargs"]["enable_thinking"] == false
+          refute Map.has_key?(decoded, "chat_template_kwargs")
           assert is_list(decoded["messages"])
           Req.Test.json(conn, chat_response(Jason.encode!(%{"name" => "ok"})))
         end)

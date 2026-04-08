@@ -166,10 +166,18 @@ defmodule Noter.Notes.PipelineTest do
 
       plug = dual_plug(@valid_facts, @notes_markdown)
 
-      Pipeline.run(session.id, plug: plug)
+      {:ok, _pid} = Jobs.start_notes_generation(session, plug: plug)
 
-      assert_received {:notes_progress, %{stage: :extracting, completed: 1, total: 1}}
-      assert_received {:notes_progress, %{stage: :complete}}
+      assert_receive {:notes_progress,
+                      %{
+                        stage: :extracting,
+                        chunks: [%{index: 0, status: :done}],
+                        completed: 1,
+                        total: 1
+                      }},
+                     5000
+
+      assert_receive {:notes_progress, %{stage: :complete}}, 5000
     end
 
     test "broadcasts error event on failure" do
@@ -214,21 +222,14 @@ defmodule Noter.Notes.PipelineTest do
   end
 
   describe "Jobs.start_notes_generation/2" do
-    test "returns {:ok, pid} and completes pipeline in background" do
+    test "returns {:ok, :started} and registers in JobRegistry" do
       session = setup_session()
       setup_llm_settings()
-      Jobs.subscribe(session.id)
 
       plug = dual_plug(@valid_facts, @notes_markdown)
 
-      assert {:ok, pid} = Jobs.start_notes_generation(session, plug: plug)
-      assert is_pid(pid)
-
-      ref = Process.monitor(pid)
-      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5000
-
-      updated = Sessions.get_session!(session.id)
-      assert updated.status == "done"
+      assert {:ok, :started} = Jobs.start_notes_generation(session, plug: plug)
+      assert Jobs.running?(session.id, :notes)
     end
 
     test "returns {:error, :already_running} when notes job is in progress" do

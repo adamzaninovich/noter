@@ -29,14 +29,16 @@ defmodule Noter.LLM.Structured do
   defp attempt(role, messages, opts, attempts) do
     case Client.chat(role, messages, opts) do
       {:ok, content} ->
-        case Jason.decode(content) do
+        case Client.parse_json(content) do
           {:ok, parsed} ->
             {:ok, parsed}
 
           {:error, decode_error} ->
-            Logger.warning(
-              "Structured fallback: JSON decode failed on attempt #{attempts + 1}, " <>
-                "error=#{inspect(decode_error)}, content=#{inspect(String.slice(content, 0..500))}"
+            Logger.error(
+              "Structured fallback decode failed. " <>
+                "attempt=#{attempts + 1} " <>
+                "content=#{inspect(content, limit: :infinity, printable_limit: :infinity)} " <>
+                "error=#{inspect(decode_error)}"
             )
 
             retry_messages =
@@ -46,7 +48,7 @@ defmodule Noter.LLM.Structured do
                   %{
                     "role" => "user",
                     "content" =>
-                      "That was not valid JSON. Please respond with ONLY valid JSON matching the schema, no other text."
+                      "That was not valid JSON. Please respond with ONLY valid JSON, no markdown fences or other text."
                   }
                 ]
 
