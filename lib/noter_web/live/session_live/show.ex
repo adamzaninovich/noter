@@ -504,6 +504,7 @@ defmodule NoterWeb.SessionLive.Show do
                         class="textarea textarea-bordered w-full font-mono text-sm"
                         rows="20"
                         phx-debounce="300"
+                        phx-blur="flush_notes_draft"
                       >{@notes_draft}</textarea>
                     </form>
                   </div>
@@ -1508,12 +1509,27 @@ defmodule NoterWeb.SessionLive.Show do
     end
   end
 
+  def handle_event("flush_notes_draft", %{"draft" => draft}, socket) do
+    {:noreply, assign(socket, :notes_draft, draft)}
+  end
+
   def handle_event("notes_draft_changed", %{"draft" => draft}, socket) do
     {:noreply, assign(socket, :notes_draft, draft)}
   end
 
   def handle_event("switch_notes_tab", %{"tab" => tab}, socket) do
-    {:noreply, assign(socket, :notes_tab, String.to_existing_atom(tab))}
+    tab_atom =
+      case tab do
+        "write" -> :write
+        "preview" -> :preview
+        _ -> {:unknown_tab, tab}
+      end
+
+    if is_atom(tab_atom) do
+      {:noreply, assign(socket, :notes_tab, tab_atom)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("revert_to_review", _params, socket) do
