@@ -835,7 +835,6 @@ defmodule NoterWeb.SessionLive.Show do
                 phx-click="revert_to_review"
                 data-confirm="This will revert the session back to the review stage, discarding any notes in the process. Continue?"
                 class="btn btn-error btn-sm"
-                phx-disable-with="Reverting..."
               >
                 Back to Review
               </button>
