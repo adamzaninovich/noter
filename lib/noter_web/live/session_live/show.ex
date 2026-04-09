@@ -823,7 +823,8 @@ defmodule NoterWeb.SessionLive.Show do
                 :if={@session.status in ~w(noting done) and @active_job != :notes}
                 id="back-to-review-btn"
                 phx-click="revert_to_review"
-                class="btn btn-warning btn-sm"
+                data-confirm="This will revert the session back to the review stage, discarding any notes in the process. Continue?"
+                class="btn btn-error btn-sm"
                 phx-disable-with="Reverting..."
               >
                 Back to Review
