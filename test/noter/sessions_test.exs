@@ -304,4 +304,36 @@ defmodule Noter.SessionsTest do
       assert {:error, :invalid_status} = Sessions.revert_to_review(session)
     end
   end
+
+  describe "restore_notes/1" do
+    setup %{session: session} do
+      {:ok, session} =
+        Sessions.update_session_notes(session, %{
+          status: "noting",
+          session_notes: "existing notes",
+          notes_error: "previous error"
+        })
+
+      {:ok, session: session}
+    end
+
+    test "transitions from noting to done when session_notes exist", %{session: session} do
+      {:ok, updated} = Sessions.restore_notes(session)
+      assert updated.status == "done"
+      assert updated.session_notes == "existing notes"
+      assert updated.notes_error == nil
+    end
+
+    test "rejects restore when no existing notes" do
+      {:ok, campaign} = Campaigns.create_campaign(%{name: "C3", player_map: %{}})
+      {:ok, session} = Sessions.create_session(campaign, %{name: "S3"})
+      {:ok, session} = Sessions.update_session(session, %{status: "noting"})
+      assert {:error, :no_existing_notes} = Sessions.restore_notes(session)
+    end
+
+    test "rejects restore from non-noting status", %{session: session} do
+      {:ok, session} = Sessions.update_session(session, %{status: "done"})
+      assert {:error, :no_existing_notes} = Sessions.restore_notes(session)
+    end
+  end
 end
