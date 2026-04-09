@@ -9,7 +9,7 @@ defmodule NoterWeb.DownloadController do
   def download(conn, %{"session_id" => session_id}) do
     session = Sessions.get_session_with_campaign!(session_id)
 
-    if session.status == "done" do
+    if session.status in ~w(noting done) do
       session_dir = Uploads.session_dir(session.id)
       root = "#{session.campaign.name} #{session.name}"
 
@@ -19,6 +19,8 @@ defmodule NoterWeb.DownloadController do
         |> add_tracks(session_dir, root)
         |> add_transcripts(session, root)
         |> add_vocab(session_dir, root)
+        |> add_context(session, root)
+        |> add_notes(session, root)
 
       filename = "#{root}.zip"
 
@@ -101,6 +103,25 @@ defmodule NoterWeb.DownloadController do
 
     if File.exists?(path) do
       [[source: {:file, path}, path: "#{root}/vocab.txt"] | entries]
+    else
+      entries
+    end
+  end
+
+  defp add_context(entries, session, root) do
+    if session.context do
+      [[source: {:stream, [session.context]}, path: "#{root}/campaign-context.md"] | entries]
+    else
+      entries
+    end
+  end
+
+  defp add_notes(entries, session, root) do
+    if session.session_notes do
+      [
+        [source: {:stream, [session.session_notes]}, path: "#{root}/#{session.slug}-notes.md"]
+        | entries
+      ]
     else
       entries
     end
