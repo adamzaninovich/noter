@@ -216,6 +216,16 @@ defmodule Noter.Sessions do
 
   def revert_to_review(%Session{}), do: {:error, :invalid_status}
 
+  def restore_notes(%Session{status: "noting", session_notes: notes} = session)
+      when is_binary(notes) and notes != "" do
+    session
+    |> Session.notes_changeset(%{status: "done", notes_error: nil})
+    |> Repo.update()
+    |> broadcast_session_update()
+  end
+
+  def restore_notes(%Session{}), do: {:error, :no_existing_notes}
+
   def add_replacements(%Session{} = session, new_replacements) when is_map(new_replacements) do
     existing = Session.replacements(session)
     downcased = Map.new(new_replacements, fn {k, v} -> {String.downcase(k), v} end)

@@ -393,9 +393,18 @@ defmodule NoterWeb.SessionLive.Show do
                   class="textarea textarea-bordered w-full text-sm"
                   id="notes-context"
                 >{@session.context}</textarea>
-                <div class="mt-3">
+                <div class="mt-3 flex items-center gap-2">
                   <button type="submit" id="generate-notes-btn" class="btn btn-primary btn-sm">
                     <.icon name="hero-sparkles" class="size-4" /> Generate Notes
+                  </button>
+                  <button
+                    :if={@session.session_notes}
+                    type="button"
+                    id="restore-notes-btn"
+                    phx-click="restore_notes"
+                    class="btn btn-outline btn-sm"
+                  >
+                    <.icon name="hero-arrow-path" class="size-4" /> Restore Previous Notes
                   </button>
                 </div>
               </.form>
@@ -1485,6 +1494,30 @@ defmodule NoterWeb.SessionLive.Show do
       {:error, changeset} ->
         Logger.error("Failed to save context: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to save context.")}
+    end
+  end
+
+  def handle_event("restore_notes", _params, socket) do
+    session = socket.assigns.session
+
+    case Sessions.restore_notes(session) do
+      {:ok, session} ->
+        %{raw_turns: raw_turns, replacements: replacements, edits: edits} = socket.assigns
+        done_stats = compute_done_stats(session, raw_turns, replacements, edits)
+
+        {:noreply,
+         socket
+         |> assign(:session, session)
+         |> assign(:done_stats, done_stats)
+         |> assign(:read_only?, true)
+         |> put_flash(:info, "Notes restored.")}
+
+      {:error, :no_existing_notes} ->
+        {:noreply, put_flash(socket, :error, "No existing notes to restore.")}
+
+      {:error, changeset} ->
+        Logger.error("Failed to restore notes: #{inspect(changeset)}")
+        {:noreply, put_flash(socket, :error, "Failed to restore notes.")}
     end
   end
 
