@@ -263,7 +263,7 @@ defmodule Noter.SessionsTest do
     end
   end
 
-  describe "edit_session/1" do
+  describe "revert_to_review/1" do
     setup %{session: session} do
       session = Repo.preload(session, :campaign)
 
@@ -291,17 +291,17 @@ defmodule Noter.SessionsTest do
     test "transitions from done to reviewing and clears notes_error and transcript_srt", %{
       session: session
     } do
-      {:ok, updated} = Sessions.edit_session(session)
+      {:ok, updated} = Sessions.revert_to_review(session)
       assert updated.status == "reviewing"
       assert updated.notes_error == nil
       assert updated.session_notes == "some notes"
       assert updated.transcript_srt == nil
     end
 
-    test "rejects edit_session from non-done status" do
+    test "rejects revert_to_review from non-done status" do
       {:ok, campaign} = Campaigns.create_campaign(%{name: "C2", player_map: %{}})
       {:ok, session} = Sessions.create_session(campaign, %{name: "S2"})
-      assert {:error, :invalid_status} = Sessions.edit_session(session)
+      assert {:error, :invalid_status} = Sessions.revert_to_review(session)
     end
   end
 end
