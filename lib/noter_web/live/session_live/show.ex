@@ -504,8 +504,17 @@ defmodule NoterWeb.SessionLive.Show do
                         class="textarea textarea-bordered w-full font-mono text-sm"
                         rows="20"
                         phx-debounce="300"
-                        phx-blur="flush_notes_draft"
+                        phx-hook=".FlushOnBlur"
                       >{@notes_draft}</textarea>
+                      <script :type={Phoenix.LiveView.ColocatedHook} name=".FlushOnBlur">
+                        export default {
+                          mounted() {
+                            this.el.addEventListener("blur", () => {
+                              this.pushEvent("flush_notes_draft", {draft: this.el.value})
+                            })
+                          }
+                        }
+                      </script>
                     </form>
                   </div>
                   <input
@@ -1541,7 +1550,10 @@ defmodule NoterWeb.SessionLive.Show do
          socket
          |> assign(:session, session)
          |> assign(:done_stats, nil)
-         |> assign(:read_only?, false)}
+         |> assign(:read_only?, false)
+         |> assign(:editing_notes?, false)
+         |> assign(:notes_draft, nil)
+         |> assign(:notes_tab, :write)}
 
       {:error, :invalid_status} ->
         {:noreply, put_flash(socket, :error, "Session is not in the done state.")}
