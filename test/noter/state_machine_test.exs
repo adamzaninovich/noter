@@ -81,7 +81,7 @@ defmodule Noter.StateMachineTest do
   end
 
   describe "backward transition: done → reviewing" do
-    test "edit_session clears notes_error and transcript_srt, preserves notes", %{
+    test "revert_to_review clears notes_error and transcript_srt, preserves notes", %{
       session: session
     } do
       {:ok, s} =
@@ -101,7 +101,7 @@ defmodule Noter.StateMachineTest do
 
       s = Ecto.Changeset.change(s, %{transcript_srt: "srt data"}) |> Repo.update!()
 
-      {:ok, reverted} = Sessions.edit_session(s)
+      {:ok, reverted} = Sessions.revert_to_review(s)
       assert reverted.status == "reviewing"
       assert reverted.notes_error == nil
       assert reverted.session_notes == "# Notes"
@@ -110,7 +110,7 @@ defmodule Noter.StateMachineTest do
   end
 
   describe "backward transition: noting → reviewing" do
-    test "edit_session from noting clears notes_error and transcript_srt", %{session: session} do
+    test "revert_to_review from noting clears notes_error and transcript_srt", %{session: session} do
       {:ok, s} =
         Sessions.update_transcription(session, %{
           status: "reviewing",
@@ -123,7 +123,7 @@ defmodule Noter.StateMachineTest do
       # Simulate a notes failure
       {:ok, s} = Sessions.update_session_notes(s, %{notes_error: "LLM unavailable"})
 
-      {:ok, reverted} = Sessions.edit_session(s)
+      {:ok, reverted} = Sessions.revert_to_review(s)
       assert reverted.status == "reviewing"
       assert reverted.notes_error == nil
       assert reverted.transcript_srt == nil
@@ -135,8 +135,8 @@ defmodule Noter.StateMachineTest do
       assert {:error, :invalid_status} = Sessions.finalize(session)
     end
 
-    test "edit_session rejects non-noting/done session", %{session: session} do
-      assert {:error, :invalid_status} = Sessions.edit_session(session)
+    test "revert_to_review rejects non-noting/done session", %{session: session} do
+      assert {:error, :invalid_status} = Sessions.revert_to_review(session)
     end
 
     test "update_corrections rejects non-reviewing session", %{session: session} do

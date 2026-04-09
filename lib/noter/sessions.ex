@@ -203,7 +203,7 @@ defmodule Noter.Sessions do
   Edit session: `done|noting → reviewing` backward transition.
   Clears notes_error and transcript_srt so the transcript will be re-finalized.
   """
-  def edit_session(%Session{status: status} = session) when status in ~w(noting done) do
+  def revert_to_review(%Session{status: status} = session) when status in ~w(noting done) do
     session
     |> Session.notes_changeset(%{
       status: "reviewing",
@@ -214,7 +214,7 @@ defmodule Noter.Sessions do
     |> broadcast_session_update()
   end
 
-  def edit_session(%Session{}), do: {:error, :invalid_status}
+  def revert_to_review(%Session{}), do: {:error, :invalid_status}
 
   def add_replacements(%Session{} = session, new_replacements) when is_map(new_replacements) do
     existing = Session.replacements(session)

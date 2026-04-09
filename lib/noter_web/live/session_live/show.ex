@@ -48,6 +48,9 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:transcription_status, nil)
       |> assign(:upload_progress, nil)
       |> assign(:notes_progress, nil)
+      |> assign(:editing_notes?, false)
+      |> assign(:notes_draft, "")
+      |> assign(:notes_tab, :write)
       |> assign_audio_urls(session)
 
     socket =
@@ -404,21 +407,9 @@ defmodule NoterWeb.SessionLive.Show do
         <%= if @done_stats do %>
           <div class="card bg-base-200 shadow-sm">
             <div class="card-body">
-              <div class="flex items-center justify-between gap-2">
-                <h2 class="card-title text-lg whitespace-nowrap">
-                  <.icon name="hero-check-circle-solid" class="size-6 text-success" />
-                  Session Complete
-                </h2>
-                <button
-                  :if={@session.status in ~w(noting done) and @active_job != :notes}
-                  id="edit-session-btn"
-                  phx-click="edit_session"
-                  class="btn btn-outline btn-sm shrink-0"
-                  phx-disable-with="Reverting..."
-                >
-                  Edit Session
-                </button>
-              </div>
+              <h2 class="card-title text-lg whitespace-nowrap">
+                <.icon name="hero-check-circle-solid" class="size-6 text-success" /> Session Complete
+              </h2>
 
               <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-3 gap-4">
                 <div class="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
@@ -465,12 +456,96 @@ defmodule NoterWeb.SessionLive.Show do
           class="card bg-base-200 shadow-sm"
         >
           <div class="card-body">
-            <h2 class="card-title text-lg">
-              <.icon name="hero-document-text" class="size-5" /> Session Notes
-            </h2>
-            <div class="prose prose-sm max-w-none mt-2">
-              {render_markdown(@session.session_notes)}
+            <div class="flex items-center justify-between">
+              <h2 class="card-title text-lg">
+                <.icon name="hero-document-text" class="size-5" /> Session Notes
+              </h2>
+              <div :if={!@editing_notes?} class="flex items-center gap-1">
+                <button
+                  id="copy-notes-btn"
+                  phx-hook=".CopyToClipboard"
+                  data-content={@session.session_notes}
+                  class="btn btn-ghost btn-sm btn-square"
+                  title="Copy notes"
+                >
+                  <.icon name="hero-document-duplicate" class="size-4" />
+                </button>
+                <button
+                  id="edit-notes-btn"
+                  phx-click="edit_notes"
+                  class="btn btn-ghost btn-sm btn-square"
+                  title="Edit notes"
+                >
+                  <.icon name="hero-pencil-square" class="size-4" />
+                </button>
+              </div>
             </div>
+            <%= if @editing_notes? do %>
+              <div class="mt-2">
+                <div role="tablist" class="tabs tabs-lift">
+                  <input
+                    type="radio"
+                    name="notes-tabs"
+                    role="tab"
+                    class="tab"
+                    aria-label="Write"
+                    checked={@notes_tab == :write}
+                    phx-click="switch_notes_tab"
+                    phx-value-tab="write"
+                  />
+                  <div
+                    role="tabpanel"
+                    class="tab-content border-base-300 bg-base-100 rounded-box rounded-tl-none p-4"
+                  >
+                    <form id="notes-draft-form" phx-change="notes_draft_changed">
+                      <textarea
+                        id="notes-editor"
+                        name="draft"
+                        class="textarea textarea-bordered w-full font-mono text-sm"
+                        rows="20"
+                        phx-debounce="300"
+                      >{@notes_draft}</textarea>
+                    </form>
+                  </div>
+                  <input
+                    type="radio"
+                    name="notes-tabs"
+                    role="tab"
+                    class="tab"
+                    aria-label="Preview"
+                    checked={@notes_tab == :preview}
+                    phx-click="switch_notes_tab"
+                    phx-value-tab="preview"
+                  />
+                  <div role="tabpanel" class="tab-content border-base-300 bg-base-100 rounded-box p-4">
+                    <div class="prose prose-sm max-w-none">
+                      {render_markdown(@notes_draft)}
+                    </div>
+                  </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-3">
+                  <button
+                    id="cancel-edit-notes-btn"
+                    phx-click="cancel_edit_notes"
+                    class="btn btn-ghost btn-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    id="save-notes-btn"
+                    phx-click="save_notes"
+                    class="btn btn-primary btn-sm"
+                    phx-disable-with="Saving..."
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            <% else %>
+              <div class="prose prose-sm max-w-none mt-2">
+                {render_markdown(@session.session_notes)}
+              </div>
+            <% end %>
           </div>
         </div>
 
@@ -743,7 +818,16 @@ defmodule NoterWeb.SessionLive.Show do
             <p class="text-sm text-base-content/60">
               Deleting this session will also remove all its uploaded files.
             </p>
-            <div class="mt-2">
+            <div class="flex gap-2 mt-2">
+              <button
+                :if={@session.status in ~w(noting done) and @active_job != :notes}
+                id="back-to-review-btn"
+                phx-click="revert_to_review"
+                class="btn btn-warning btn-sm"
+                phx-disable-with="Reverting..."
+              >
+                Back to Review
+              </button>
               <button
                 id="delete-session-btn"
                 phx-click="delete_session"
@@ -757,6 +841,27 @@ defmodule NoterWeb.SessionLive.Show do
         </div>
       </div>
     </Layouts.app>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".CopyToClipboard">
+      export default {
+        mounted() {
+          this.el.addEventListener("click", () => {
+            const content = this.el.getAttribute("data-content")
+            if (!content) return
+            navigator.clipboard.writeText(content).then(() => {
+              const icon = this.el.querySelector("span")
+              if (icon) {
+                icon.classList.remove("hero-document-duplicate")
+                icon.classList.add("hero-check")
+                setTimeout(() => {
+                  icon.classList.remove("hero-check")
+                  icon.classList.add("hero-document-duplicate")
+                }, 1500)
+              }
+            })
+          })
+        }
+      }
+    </script>
     <script :type={Phoenix.LiveView.ColocatedHook} name=".ReplacementForm">
       export default {
         mounted() {
@@ -1373,10 +1478,47 @@ defmodule NoterWeb.SessionLive.Show do
     end
   end
 
-  def handle_event("edit_session", _params, socket) do
+  def handle_event("edit_notes", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:editing_notes?, true)
+     |> assign(:notes_draft, socket.assigns.session.session_notes || "")
+     |> assign(:notes_tab, :write)}
+  end
+
+  def handle_event("cancel_edit_notes", _params, socket) do
+    {:noreply, assign(socket, :editing_notes?, false)}
+  end
+
+  def handle_event("save_notes", _params, socket) do
+    session = socket.assigns.session
+    draft = socket.assigns.notes_draft
+
+    case Sessions.update_session_notes(session, %{session_notes: draft}) do
+      {:ok, session} ->
+        {:noreply,
+         socket
+         |> assign(:session, session)
+         |> assign(:editing_notes?, false)}
+
+      {:error, changeset} ->
+        Logger.error("Failed to save notes: #{inspect(changeset)}")
+        {:noreply, put_flash(socket, :error, "Failed to save notes.")}
+    end
+  end
+
+  def handle_event("notes_draft_changed", %{"draft" => draft}, socket) do
+    {:noreply, assign(socket, :notes_draft, draft)}
+  end
+
+  def handle_event("switch_notes_tab", %{"tab" => tab}, socket) do
+    {:noreply, assign(socket, :notes_tab, String.to_existing_atom(tab))}
+  end
+
+  def handle_event("revert_to_review", _params, socket) do
     session = socket.assigns.session
 
-    case Sessions.edit_session(session) do
+    case Sessions.revert_to_review(session) do
       {:ok, session} ->
         {:noreply,
          socket
