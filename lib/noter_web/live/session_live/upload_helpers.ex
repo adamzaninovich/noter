@@ -39,7 +39,6 @@ defmodule NoterWeb.SessionLive.UploadHelpers do
     upload_name =
       case upload_ref do
         r when r == socket.assigns.uploads.zip_file.ref -> :zip_file
-        r when r == socket.assigns.uploads.aac_file.ref -> :aac_file
         r when r == socket.assigns.uploads.vocab_file.ref -> :vocab_file
         _ -> nil
       end

@@ -204,15 +204,16 @@ defmodule Noter.Transcription.SSEClient do
   defp dispatch_event("done", data, state) do
     result = Map.get(data, "result", %{})
 
+    # Save transcript but do NOT transition to "reviewing" — the gate check
+    # in Jobs.check_advance_to_reviewing/1 handles that once both transcription
+    # and M4A encoding are complete.
     Sessions.update_transcription(
       Sessions.get_session!(state.session_id),
-      %{
-        status: "reviewing",
-        transcript_json: encode_if_map(result)
-      }
+      %{transcript_json: encode_if_map(result)}
     )
 
     broadcast(state.session_id, :done, %{})
+    Noter.Jobs.check_advance_to_reviewing(state.session_id)
     state
   end
 

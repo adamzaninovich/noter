@@ -36,12 +36,6 @@ defmodule NoterWeb.SessionLive.New do
        max_file_size: 2_000_000_000,
        chunk_size: 512_000
      )
-     |> allow_upload(:aac_file,
-       accept: ~w(.aac),
-       max_entries: 1,
-       max_file_size: 1_000_000_000,
-       chunk_size: 512_000
-     )
      |> allow_upload(:vocab_file, accept: ~w(.txt), max_entries: 1, max_file_size: 1_000_000)}
   end
 
@@ -116,24 +110,6 @@ defmodule NoterWeb.SessionLive.New do
                     </div>
                   </div>
 
-                  <%!-- AAC Upload --%>
-                  <div>
-                    <label class="label font-medium">
-                      Merged Audio (AAC)
-                    </label>
-                    <div class="flex flex-col gap-2" phx-drop-target={@uploads.aac_file.ref}>
-                      <.live_file_input
-                        upload={@uploads.aac_file}
-                        class="file-input file-input-bordered w-full"
-                      />
-                      <.upload_entries
-                        entries={@uploads.aac_file.entries}
-                        upload_ref={@uploads.aac_file.ref}
-                        upload={@uploads.aac_file}
-                      />
-                    </div>
-                  </div>
-
                   <%!-- Vocab Upload --%>
                   <div>
                     <label class="label font-medium">Vocabulary File (TXT)</label>
@@ -161,8 +137,7 @@ defmodule NoterWeb.SessionLive.New do
                     phx-disable-with="Uploading..."
                     disabled={
                       @form[:name].value in [nil, ""] or
-                        @uploads.zip_file.entries == [] or
-                        @uploads.aac_file.entries == []
+                        @uploads.zip_file.entries == []
                     }
                   >
                     Create Session
@@ -194,35 +169,28 @@ defmodule NoterWeb.SessionLive.New do
   def handle_event("save", %{"session" => session_params}, socket) do
     campaign = socket.assigns.campaign
 
-    cond do
-      socket.assigns.uploads.zip_file.entries == [] ->
-        {:noreply, put_flash(socket, :error, "A ZIP file is required.")}
+    if socket.assigns.uploads.zip_file.entries == [] do
+      {:noreply, put_flash(socket, :error, "A ZIP file is required.")}
+    else
+      changeset =
+        %Noter.Sessions.Session{campaign_id: campaign.id}
+        |> Sessions.change_session(session_params)
 
-      socket.assigns.uploads.aac_file.entries == [] ->
-        {:noreply, put_flash(socket, :error, "A merged audio file is required.")}
+      if changeset.valid? do
+        zip_paths = consume_uploaded_entries(socket, :zip_file, &consume_to_tmp/2)
+        vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
 
-      true ->
-        changeset =
-          %Noter.Sessions.Session{campaign_id: campaign.id}
-          |> Sessions.change_session(session_params)
+        Jobs.start_upload_processing(
+          session_params,
+          campaign,
+          List.first(zip_paths),
+          List.first(vocab_paths)
+        )
 
-        if changeset.valid? do
-          zip_paths = consume_uploaded_entries(socket, :zip_file, &consume_to_tmp/2)
-          aac_paths = consume_uploaded_entries(socket, :aac_file, &consume_to_tmp/2)
-          vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
-
-          Jobs.start_upload_processing(
-            session_params,
-            campaign,
-            List.first(zip_paths),
-            List.first(aac_paths),
-            List.first(vocab_paths)
-          )
-
-          {:noreply, assign(socket, processing?: true, processing_status: "Creating session...")}
-        else
-          {:noreply, assign(socket, form: to_form(%{changeset | action: :validate}))}
-        end
+        {:noreply, assign(socket, processing?: true, processing_status: "Creating session...")}
+      else
+        {:noreply, assign(socket, form: to_form(%{changeset | action: :validate}))}
+      end
     end
   end
 

@@ -78,13 +78,53 @@ defmodule Noter.Jobs do
       {:ok, updated} ->
         broadcast(session_id, {:trim_complete, :ok, updated})
 
-        # Auto-chain: start transcription after trim completes
-        # WAV cleanup is deferred until transcription is durably started
+        duration = end_seconds - start_seconds
+
+        # Fork: start transcription AND M4A encode in parallel
         start_transcription_submit(updated)
+        start_m4a_encode(updated, duration)
 
       {:error, changeset} ->
         Logger.error("Failed to update session #{session_id} after trim: #{inspect(changeset)}")
         broadcast(session_id, {:trim_complete, {:error, "Failed to update session"}})
+    end
+  end
+
+  def start_m4a_encode(session, duration) do
+    session_id = session.id
+
+    Task.Supervisor.start_child(@supervisor, fn ->
+      Registry.register(@registry, {session_id, :m4a_encode}, [])
+
+      on_progress = fn pct ->
+        broadcast(session_id, {:m4a_progress, pct})
+      end
+
+      case Uploads.encode_merged_m4a(session_id, duration, on_progress) do
+        :ok ->
+          broadcast(session_id, {:m4a_complete, :ok})
+          check_advance_to_reviewing(session_id)
+
+        error ->
+          Logger.error("M4A encode failed for session #{session_id}: #{inspect(error)}")
+          broadcast(session_id, {:m4a_complete, error})
+      end
+    end)
+  end
+
+  def check_advance_to_reviewing(session_id) do
+    session = Sessions.get_session!(session_id)
+    m4a_path = Path.join(Uploads.session_dir(session_id), "trimmed/merged.m4a")
+
+    has_transcript? = session.transcript_json != nil
+    has_m4a? = File.exists?(m4a_path)
+
+    if has_transcript? and has_m4a? and session.status == "transcribing" do
+      {:ok, _} = Sessions.update_session(session, %{status: "reviewing"})
+      broadcast(session_id, {:both_complete})
+      {:ok, :advanced}
+    else
+      {:ok, :waiting}
     end
   end
 
@@ -118,20 +158,19 @@ defmodule Noter.Jobs do
     end
   end
 
-  def start_upload_processing(session_params, campaign, zip_path, aac_path, vocab_path) do
+  def start_upload_processing(session_params, campaign, zip_path, vocab_path) do
     {:ok, pid} =
       Task.Supervisor.start_child(@supervisor, fn ->
-        run_upload_processing_task(session_params, campaign, zip_path, aac_path, vocab_path)
+        run_upload_processing_task(session_params, campaign, zip_path, vocab_path)
       end)
 
     {:ok, pid}
   end
 
-  defp run_upload_processing_task(session_params, campaign, zip_path, aac_path, vocab_path) do
+  defp run_upload_processing_task(session_params, campaign, zip_path, vocab_path) do
     case Sessions.create_session(campaign, session_params) do
       {:ok, session} ->
         Registry.register(@registry, {session.id, :upload}, [])
-        broadcast_upload(campaign.id, {:processing_status, "Copying audio file..."})
 
         on_progress = fn status ->
           broadcast_upload(campaign.id, {:processing_status, status})
@@ -141,7 +180,6 @@ defmodule Noter.Jobs do
                session,
                campaign,
                zip_path,
-               aac_path,
                vocab_path,
                on_progress
              ) do
@@ -228,10 +266,6 @@ defmodule Noter.Jobs do
 
     {:ok, updated} =
       Sessions.update_transcription(session, %{transcription_job_id: job_id})
-
-    # WAV cleanup is safe now: trim source is no longer needed since
-    # the transcription job has the audio and the job_id is persisted.
-    Uploads.cleanup_wav(session_id)
 
     try do
       {:ok, _pid} =
