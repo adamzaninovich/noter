@@ -319,7 +319,7 @@ defmodule NoterWeb.SessionLive.Show do
             </h2>
             <div class="flex items-center gap-3 mt-1">
               <progress
-                class="progress progress-secondary flex-1 h-2"
+                class="progress progress-accent flex-1 h-2"
                 value={@m4a_progress || 0}
                 max="100"
               >
@@ -871,6 +871,7 @@ defmodule NoterWeb.SessionLive.Show do
               <div class="flex gap-4 mt-3 text-sm text-base-content/60">
                 <.file_indicator label="Merged Audio" exists?={@has_merged_audio?} />
                 <.file_indicator label="Vocabulary" exists?={@has_vocab?} />
+                <.file_indicator label="M4A Audio" exists?={@m4a_complete?} />
               </div>
             </div>
           </div>
