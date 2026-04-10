@@ -32,7 +32,7 @@ defmodule Noter.JobsTest do
       first = Jobs.start_m4a_encode(session, session.duration_seconds)
       assert first == {:ok, :started}
 
-      assert Jobs.running?(session.id, :m4a_encode) == true
+      wait_for(fn -> Jobs.running?(session.id, :m4a_encode) end)
 
       second = Jobs.start_m4a_encode(session, session.duration_seconds)
       assert second == {:error, :already_running}

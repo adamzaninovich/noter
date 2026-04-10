@@ -58,4 +58,16 @@ defmodule Noter.DataCase do
       end)
     end)
   end
+
+  def wait_for(fun, retries \\ 50) do
+    if fun.() do
+      true
+    else
+      if retries > 0 do
+        wait_for(fun, retries - 1)
+      else
+        false
+      end
+    end
+  end
 end
