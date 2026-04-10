@@ -37,13 +37,11 @@ defmodule NoterWeb.SessionLive.M4aProgressTest do
   end
 
   describe "M4A encoding card during transcription" do
-    setup %{session: session} do
-      {:ok, session} = Sessions.update_session(session, %{status: "transcribing"})
-      {:ok, session: session}
-    end
-
     test "shows M4A encoding progress card when m4a_complete? is false",
          %{conn: conn, campaign: campaign, session: session} do
+      {:ok, session} = Sessions.update_session(session, %{status: "transcribing"})
+      session = Noter.Repo.preload(session, :campaign)
+
       {:ok, view, _html} =
         live(conn, ~p"/campaigns/#{campaign.slug}/sessions/#{session.slug}")
 

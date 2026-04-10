@@ -68,10 +68,25 @@ defmodule Noter.Sessions do
   end
 
   def update_session(%Session{} = session, attrs) do
-    session
-    |> Session.changeset(attrs)
-    |> Repo.update()
-    |> broadcast_session_update()
+    session = Repo.preload(session, :campaign)
+
+    result =
+      Repo.transaction(fn ->
+        with {:ok, session} <-
+               session
+               |> Session.changeset(attrs)
+               |> Repo.update(),
+             {:ok, session} <- apply_campaign_replacements(session, attrs) do
+          session
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, session} -> {:ok, session} |> broadcast_session_update()
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   def update_transcription(%Session{} = session, attrs) do

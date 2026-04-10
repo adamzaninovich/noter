@@ -93,23 +93,45 @@ defmodule Noter.Jobs do
   def start_m4a_encode(session, duration) do
     session_id = session.id
 
-    Task.Supervisor.start_child(@supervisor, fn ->
-      Registry.register(@registry, {session_id, :m4a_encode}, [])
+    if running?(session_id, :m4a_encode) do
+      {:error, :already_running}
+    else
+      Task.Supervisor.start_child(@supervisor, fn ->
+        Registry.register(@registry, {session_id, :m4a_encode}, [])
+        Registry.register(@registry, {session_id, :m4a_progress}, 0)
 
-      on_progress = fn pct ->
-        broadcast(session_id, {:m4a_progress, pct})
-      end
+        on_progress = fn pct ->
+          broadcast(session_id, {:m4a_progress, pct})
 
-      case Uploads.encode_merged_m4a(session_id, duration, on_progress) do
-        :ok ->
-          broadcast(session_id, {:m4a_complete, :ok})
-          check_advance_to_reviewing(session_id)
+          try do
+            Registry.update_value(@registry, {session_id, :m4a_progress}, fn _ -> pct end)
+          rescue
+            _ -> :ok
+          end
+        end
 
-        error ->
-          Logger.error("M4A encode failed for session #{session_id}: #{inspect(error)}")
-          broadcast(session_id, {:m4a_complete, error})
-      end
-    end)
+        case Uploads.encode_merged_m4a(session_id, duration, on_progress) do
+          :ok ->
+            broadcast(session_id, {:m4a_complete, :ok})
+            Registry.unregister(@registry, {session_id, :m4a_progress})
+            check_advance_to_reviewing(session_id)
+
+          error ->
+            Logger.error("M4A encode failed for session #{session_id}: #{inspect(error)}")
+            broadcast(session_id, {:m4a_complete, error})
+            Registry.unregister(@registry, {session_id, :m4a_progress})
+        end
+      end)
+
+      {:ok, :started}
+    end
+  end
+
+  def get_m4a_progress(session_id) do
+    case Registry.lookup(@registry, {session_id, :m4a_progress}) do
+      [{_pid, progress}] -> progress
+      [] -> nil
+    end
   end
 
   def check_advance_to_reviewing(session_id) do
