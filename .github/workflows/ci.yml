@@ -48,7 +48,9 @@ jobs:
         run: mix deps.unlock --check-unused
 
       - name: Run tests with coverage
-        run: mix coveralls | tee coverage.txt
+        run: |
+          set -o pipefail
+          mix coveralls 2>&1 | tee coverage.txt
 
       - name: Post coverage comment
         if: github.event_name == 'pull_request'

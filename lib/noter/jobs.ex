@@ -142,9 +142,14 @@ defmodule Noter.Jobs do
     has_m4a? = File.exists?(m4a_path)
 
     if has_transcript? and has_m4a? and session.status == "transcribing" do
-      {:ok, _} = Sessions.update_session(session, %{status: "reviewing"})
-      broadcast(session_id, {:both_complete})
-      {:ok, :advanced}
+      case Sessions.atomic_advance_to_reviewing(session_id) do
+        {:ok, :advanced} ->
+          broadcast(session_id, :both_complete)
+          {:ok, :advanced}
+
+        {:ok, :already_reviewing} ->
+          {:ok, :already_reviewing}
+      end
     else
       {:ok, :waiting}
     end

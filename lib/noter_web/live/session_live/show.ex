@@ -1880,7 +1880,7 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:active_job, nil)}
   end
 
-  def handle_info({:both_complete}, socket) do
+  def handle_info(:both_complete, socket) do
     session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
 
     {:noreply,

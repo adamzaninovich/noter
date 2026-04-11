@@ -89,6 +89,26 @@ defmodule Noter.Sessions do
     end
   end
 
+  def atomic_advance_to_reviewing(session_id) do
+    case Repo.transaction(fn ->
+           case Repo.update_all(
+                  from(s in Session, where: s.id == ^session_id and s.status == "transcribing"),
+                  set: [status: "reviewing"]
+                ) do
+             {1, _} ->
+               session = Session |> Repo.get!(session_id) |> Repo.preload(:campaign)
+               {:ok, _session} = apply_campaign_replacements(session, %{status: "reviewing"})
+               {:ok, :advanced}
+
+             {0, _} ->
+               {:ok, :already_reviewing}
+           end
+         end) do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   def update_transcription(%Session{} = session, attrs) do
     session = Repo.preload(session, :campaign)
 
