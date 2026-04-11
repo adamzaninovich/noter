@@ -178,6 +178,16 @@ defmodule Noter.Notes.PipelineTest do
                      5000
 
       assert_receive {:notes_progress, %{stage: :complete}}, 5000
+
+      # Wait for Runner to fully shut down so sandbox isn't torn down mid-query
+      case Registry.lookup(Noter.JobRegistry, {session.id, :notes}) do
+        [{pid, _}] ->
+          ref = Process.monitor(pid)
+          assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5000
+
+        [] ->
+          :ok
+      end
     end
 
     test "broadcasts error event on failure" do
@@ -230,6 +240,16 @@ defmodule Noter.Notes.PipelineTest do
 
       assert {:ok, :started} = Jobs.start_notes_generation(session, plug: plug)
       assert Jobs.running?(session.id, :notes)
+
+      # Wait for Runner to fully shut down so sandbox isn't torn down mid-query
+      case Registry.lookup(Noter.JobRegistry, {session.id, :notes}) do
+        [{pid, _}] ->
+          ref = Process.monitor(pid)
+          assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5000
+
+        [] ->
+          :ok
+      end
     end
 
     test "returns {:error, :already_running} when notes job is in progress" do
