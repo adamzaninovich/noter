@@ -64,6 +64,7 @@ defmodule Noter.DataCase do
       true
     else
       if retries > 0 do
+        Process.sleep(1)
         wait_for(fun, retries - 1)
       else
         false
