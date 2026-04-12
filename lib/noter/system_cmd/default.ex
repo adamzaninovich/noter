@@ -8,4 +8,7 @@ defmodule Noter.SystemCmd.Default do
 
   @impl true
   def open_port(name, settings), do: Port.open(name, settings)
+
+  @impl true
+  def find_executable(program), do: System.find_executable(program)
 end

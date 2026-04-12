@@ -229,6 +229,7 @@ defmodule Noter.Uploads do
          on_percent
        ) do
     total_us = trunc(duration_seconds * 1_000_000)
+    ffmpeg = Noter.SystemCmd.find_executable("ffmpeg") || "ffmpeg"
 
     args =
       ["-y", "-nostats", "-loglevel", "error"] ++
@@ -238,7 +239,7 @@ defmodule Noter.Uploads do
         ["-progress", "pipe:1", output]
 
     port =
-      Noter.SystemCmd.open_port({:spawn_executable, "ffmpeg"}, [
+      Noter.SystemCmd.open_port({:spawn_executable, ffmpeg}, [
         :binary,
         :exit_status,
         :stderr_to_stdout,

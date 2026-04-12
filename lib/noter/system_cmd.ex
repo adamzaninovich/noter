@@ -5,6 +5,7 @@ defmodule Noter.SystemCmd do
 
   @callback cmd(binary(), [binary()], keyword()) :: {binary(), non_neg_integer()}
   @callback open_port({:spawn_executable, binary()}, list()) :: port()
+  @callback find_executable(binary()) :: binary() | nil
 
   def cmd(program, args, opts \\ []) do
     impl().cmd(program, args, opts)
@@ -12,6 +13,10 @@ defmodule Noter.SystemCmd do
 
   def open_port(name, settings) do
     impl().open_port(name, settings)
+  end
+
+  def find_executable(program) do
+    impl().find_executable(program)
   end
 
   defp impl do

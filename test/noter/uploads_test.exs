@@ -11,6 +11,8 @@ defmodule Noter.UploadsTest do
   setup :verify_on_exit!
 
   setup do
+    stub(Noter.SystemCmd.Mock, :find_executable, fn "ffmpeg" -> "/usr/bin/ffmpeg" end)
+
     {:ok, campaign} =
       Campaigns.create_campaign(%{name: "Test Campaign", player_map: %{"coolgamer" => "Thorin"}})
 
@@ -139,7 +141,7 @@ defmodule Noter.UploadsTest do
       wav_path = Path.join(base_dir, "merged.wav")
       File.write!(wav_path, "fake wav")
 
-      expect(Noter.SystemCmd.Mock, :open_port, 2, fn {:spawn_executable, "ffmpeg"}, opts ->
+      expect(Noter.SystemCmd.Mock, :open_port, 2, fn {:spawn_executable, _path}, opts ->
         args = Keyword.fetch!(opts, :args)
         output_path = Enum.at(args, -1)
         caller = self()
@@ -175,7 +177,7 @@ defmodule Noter.UploadsTest do
       trimmed_wav = Path.join(trimmed_dir, "merged.wav")
       File.write!(trimmed_wav, "fake wav content")
 
-      expect(Noter.SystemCmd.Mock, :open_port, fn {:spawn_executable, "ffmpeg"}, opts ->
+      expect(Noter.SystemCmd.Mock, :open_port, fn {:spawn_executable, _path}, opts ->
         args = Keyword.fetch!(opts, :args)
         output_path = Enum.at(args, -1)
         caller = self()
@@ -210,7 +212,7 @@ defmodule Noter.UploadsTest do
       test_pid = self()
       on_progress = fn pct -> send(test_pid, {:m4a_progress, pct}) end
 
-      expect(Noter.SystemCmd.Mock, :open_port, fn {:spawn_executable, "ffmpeg"}, opts ->
+      expect(Noter.SystemCmd.Mock, :open_port, fn {:spawn_executable, _path}, opts ->
         args = Keyword.fetch!(opts, :args)
         output_path = Enum.at(args, -1)
         caller = self()

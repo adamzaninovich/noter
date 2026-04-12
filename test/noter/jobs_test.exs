@@ -25,6 +25,8 @@ defmodule Noter.JobsTest do
 
   describe "start_m4a_encode/2" do
     setup %{session: session} do
+      stub(Noter.SystemCmd.Mock, :find_executable, fn "ffmpeg" -> "/usr/bin/ffmpeg" end)
+
       stub(Noter.SystemCmd.Mock, :open_port, fn {:spawn_executable, _}, _opts ->
         caller = self()
         output_ref = make_ref()
