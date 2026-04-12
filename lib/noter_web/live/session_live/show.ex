@@ -37,7 +37,7 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:session, session)
       |> assign(:campaign, session.campaign)
       |> assign(:renamed_files, renamed_files)
-      |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.aac")))
+      |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.wav")))
       |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
       |> assign(:steps, @steps)
       |> assign(:active_job, active_job)
@@ -47,6 +47,9 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:transcription_progress, nil)
       |> assign(:transcription_status, nil)
       |> assign(:upload_progress, nil)
+      |> assign(:m4a_progress, nil)
+      |> assign(:m4a_complete?, m4a_complete?(session.id))
+      |> assign(:m4a_failed?, false)
       |> assign(:notes_progress, nil)
       |> assign(:editing_notes?, false)
       |> assign(:notes_draft, "")
@@ -60,6 +63,7 @@ defmodule NoterWeb.SessionLive.Show do
         socket
         |> retry_peaks_if_needed(session)
         |> reconnect_transcription(session)
+        |> reconnect_m4a_encoding(session)
         |> reconnect_notes_progress(session)
         |> assign_review_state(session)
       else
@@ -305,6 +309,69 @@ defmodule NoterWeb.SessionLive.Show do
             </div>
           </div>
         <% end %>
+
+        <%!-- M4A encoding progress (shown during transcription phase) --%>
+        <div
+          :if={@session.status == "transcribing" and not @m4a_complete? and not @m4a_failed?}
+          class="card bg-base-200 shadow-sm"
+        >
+          <div class="card-body">
+            <h2 class="card-title text-sm">
+              <.icon name="hero-musical-note" class="size-4" /> Converting to M4A
+            </h2>
+            <div class="flex items-center gap-3 mt-1">
+              <progress
+                class="progress progress-accent flex-1 h-2"
+                value={@m4a_progress || 0}
+                max="100"
+              >
+              </progress>
+              <span class="text-xs text-base-content/50 w-8 text-right">
+                {if @m4a_progress, do: "#{@m4a_progress}%", else: "0%"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Waiting for M4A after transcription completes --%>
+        <div
+          :if={@active_job == :waiting_for_m4a}
+          class="card bg-base-200 shadow-sm"
+        >
+          <div class="card-body">
+            <div class="flex flex-col items-center py-6 gap-3">
+              <span class="loading loading-spinner loading-lg text-secondary"></span>
+              <p class="text-base-content/70">Waiting for audio conversion to finish...</p>
+              <div :if={@m4a_progress} class="w-full max-w-md">
+                <progress
+                  class="progress progress-secondary w-full"
+                  value={@m4a_progress}
+                  max="100"
+                >
+                </progress>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <%!-- M4A encoding failed — inline retry --%>
+        <div
+          :if={@m4a_failed?}
+          class="card bg-base-200 shadow-sm border border-error/30"
+        >
+          <div class="card-body">
+            <h2 class="card-title text-sm text-error">
+              <.icon name="hero-exclamation-circle" class="size-4" /> Audio conversion failed
+            </h2>
+            <button
+              id="retry-m4a-btn"
+              phx-click="retry_m4a_encode"
+              class="btn btn-secondary btn-sm"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
 
         <%!-- Done summary skeleton --%>
         <%= if @session.status in ~w(noting done) and not @review_loaded? do %>
@@ -823,8 +890,9 @@ defmodule NoterWeb.SessionLive.Show do
               <% end %>
 
               <div class="flex gap-4 mt-3 text-sm text-base-content/60">
-                <.file_indicator label="Merged Audio" exists?={@has_merged_audio?} />
                 <.file_indicator label="Vocabulary" exists?={@has_vocab?} />
+                <.file_indicator label="Merged Audio" exists?={@has_merged_audio?} />
+                <.file_indicator label="M4A Audio" exists?={@m4a_complete?} />
               </div>
             </div>
           </div>
@@ -1158,7 +1226,6 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   defp trim_file_label("merged.wav"), do: "Trimming Merged"
-  defp trim_file_label("merged.m4a"), do: "Converting to M4A"
   defp trim_file_label(file), do: "Trimming #{Path.basename(file, Path.extname(file))}"
 
   defp transcription_wait_message(:uploading), do: "Uploading files to transcription service..."
@@ -1187,6 +1254,7 @@ defmodule NoterWeb.SessionLive.Show do
       Jobs.running?(session.id, :peaks) -> :peaks
       Jobs.running?(session.id, :trim) -> :trimming
       Jobs.running?(session.id, :transcription_submit) -> :transcribing
+      Jobs.running?(session.id, :m4a_encode) -> :transcribing
       session.status == "transcribing" -> :transcribing
       Jobs.running?(session.id, :notes) -> :notes
       true -> nil
@@ -1219,7 +1287,7 @@ defmodule NoterWeb.SessionLive.Show do
         trim_files =
           Enum.sort(renamed)
           |> Enum.map(&{&1, 0})
-          |> Kernel.++([{"merged.wav", 0}, {"merged.m4a", 0}])
+          |> Kernel.++([{"merged.wav", 0}])
 
         {:noreply,
          socket
@@ -1610,6 +1678,19 @@ defmodule NoterWeb.SessionLive.Show do
      |> push_navigate(to: ~p"/campaigns/#{campaign.slug}")}
   end
 
+  def handle_event("retry_m4a_encode", _, socket) do
+    session = socket.assigns.session
+
+    if not Jobs.running?(session.id, :m4a_encode) and
+         not m4a_complete?(session.id) and
+         session.duration_seconds do
+      Jobs.start_m4a_encode(session, session.duration_seconds)
+      {:noreply, assign(socket, m4a_failed?: false, m4a_progress: 0)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_info({:peaks_ready, session}, socket) do
     {:noreply,
@@ -1726,13 +1807,24 @@ defmodule NoterWeb.SessionLive.Show do
   def handle_info({:transcription, :done, _}, socket) do
     session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
 
-    {:noreply,
-     socket
-     |> assign(:session, session)
-     |> assign(:active_job, nil)
-     |> assign(:transcription_progress, nil)
-     |> assign_review_state(session)
-     |> put_flash(:info, "Transcription complete.")}
+    if socket.assigns.m4a_complete? do
+      # Both done — transition to review
+      {:noreply,
+       socket
+       |> assign(:session, session)
+       |> assign(:active_job, nil)
+       |> assign(:transcription_progress, nil)
+       |> assign_review_state(session)
+       |> put_flash(:info, "Transcription complete.")}
+    else
+      # Transcription done but M4A still encoding — show waiting state
+      {:noreply,
+       socket
+       |> assign(:session, session)
+       |> assign(:active_job, :waiting_for_m4a)
+       |> assign(:transcription_progress, nil)
+       |> put_flash(:info, "Transcription complete. Waiting for audio conversion...")}
+    end
   end
 
   def handle_info({:transcription, :error, %{error: msg}}, socket) do
@@ -1754,6 +1846,49 @@ defmodule NoterWeb.SessionLive.Show do
      |> assign(:session, session)
      |> assign(:active_job, nil)
      |> assign(:transcription_progress, nil)}
+  end
+
+  def handle_info({:m4a_progress, percent}, socket) do
+    {:noreply, assign(socket, :m4a_progress, percent)}
+  end
+
+  def handle_info({:m4a_complete, :ok}, socket) do
+    socket = assign(socket, m4a_complete?: true, m4a_progress: 100)
+
+    if socket.assigns.active_job == :waiting_for_m4a do
+      # Transcription already finished — now both done, transition to review
+      session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
+      {:noreply,
+       socket
+       |> assign(:session, session)
+       |> assign(:active_job, nil)
+       |> assign_review_state(session)
+       |> put_flash(:info, "Audio conversion complete.")}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:m4a_complete, {:error, reason}}, socket) do
+    Logger.error("M4A encode failed: #{inspect(reason)}")
+
+    {:noreply,
+     socket
+     |> assign(:m4a_failed?, true)
+     |> assign(:m4a_progress, nil)
+     |> assign(:active_job, nil)}
+  end
+
+  def handle_info(:both_complete, socket) do
+    session = Sessions.get_session_with_campaign!(socket.assigns.session.id)
+
+    {:noreply,
+     socket
+     |> assign(:session, session)
+     |> assign(:active_job, nil)
+     |> assign(:transcription_progress, nil)
+     |> assign_review_state(session)}
   end
 
   def handle_info({:notes_progress, %{stage: :writing} = progress}, socket) do
@@ -1791,6 +1926,20 @@ defmodule NoterWeb.SessionLive.Show do
       assign(socket, :notes_progress, Jobs.get_notes_progress(session.id))
     else
       socket
+    end
+  end
+
+  defp reconnect_m4a_encoding(socket, session) do
+    cond do
+      m4a_complete?(session.id) and not Jobs.running?(session.id, :m4a_encode) ->
+        socket
+
+      Jobs.running?(session.id, :m4a_encode) ->
+        progress = Jobs.get_m4a_progress(session.id)
+        assign(socket, :m4a_progress, progress)
+
+      true ->
+        socket
     end
   end
 
@@ -1832,12 +1981,15 @@ defmodule NoterWeb.SessionLive.Show do
       case Transcription.poll_job(session.transcription_job_id) do
         {:ok, %{"status" => "done", "result" => result}} ->
           Sessions.update_transcription(session, %{
-            status: "reviewing",
             transcript_json: Jason.encode!(result)
           })
 
+          Jobs.check_advance_to_reviewing(session.id)
           session = Sessions.get_session_with_campaign!(session.id)
-          assign(socket, :session, session)
+
+          socket
+          |> assign(:session, session)
+          |> assign(:m4a_complete?, m4a_complete?(session.id))
 
         {:ok, %{"status" => status}} when status in ~w(failed cancelled) ->
           Sessions.update_transcription(session, %{status: "trimming"})
@@ -1864,11 +2016,11 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   defp retry_peaks_if_needed(socket, session) do
-    has_aac? = File.exists?(Path.join(Uploads.session_dir(session.id), "merged.aac"))
+    has_wav? = File.exists?(Path.join(Uploads.session_dir(session.id), "merged.wav"))
     needs_pipeline? = is_nil(session.duration_seconds) or not socket.assigns.has_merged_audio?
     already_running? = Jobs.running?(session.id, :peaks)
 
-    if session.status == "trimming" and needs_pipeline? and has_aac? and not already_running? do
+    if session.status == "trimming" and needs_pipeline? and has_wav? and not already_running? do
       Jobs.start_peaks(session)
       assign(socket, :active_job, :peaks)
     else
@@ -1900,10 +2052,15 @@ defmodule NoterWeb.SessionLive.Show do
     trim_files =
       Enum.sort(renamed_files)
       |> Enum.map(&{&1, 0})
-      |> Kernel.++([{"merged.wav", 0}, {"merged.m4a", 0}])
+      |> Kernel.++([{"merged.wav", 0}])
 
     assign(socket, :trim_files, trim_files)
   end
 
   defp assign_trim_files(socket, _renamed_files, false = _trimming?), do: socket
+
+  defp m4a_complete?(session_id) do
+    m4a_path = Path.join(Uploads.session_dir(session_id), "trimmed/merged.m4a")
+    File.exists?(m4a_path) and not Jobs.running?(session_id, :m4a_encode)
+  end
 end

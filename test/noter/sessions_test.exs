@@ -1,5 +1,5 @@
 defmodule Noter.SessionsTest do
-  use Noter.DataCase, async: true
+  use Noter.DataCase, async: false
 
   alias Noter.Campaigns
   alias Noter.Sessions
@@ -334,6 +334,38 @@ defmodule Noter.SessionsTest do
     test "rejects restore from non-noting status", %{session: session} do
       {:ok, session} = Sessions.update_session(session, %{status: "done"})
       assert {:error, :no_existing_notes} = Sessions.restore_notes(session)
+    end
+  end
+
+  describe "update_session/2" do
+    test "applies campaign replacements when transitioning to reviewing", %{
+      campaign: campaign,
+      session: session
+    } do
+      {:ok, campaign} =
+        Campaigns.update_campaign(campaign, %{common_replacements: %{"npc" => "NPC Name"}})
+
+      session = %{session | campaign: campaign}
+
+      {:ok, updated} = Sessions.update_session(session, %{status: "reviewing"})
+
+      assert updated.status == "reviewing"
+      assert updated.corrections["replacements"]["npc"] == "NPC Name"
+    end
+
+    test "skips campaign replacements for non-reviewing status", %{
+      campaign: campaign,
+      session: session
+    } do
+      {:ok, campaign} =
+        Campaigns.update_campaign(campaign, %{common_replacements: %{"npc" => "NPC Name"}})
+
+      session = %{session | campaign: campaign}
+
+      {:ok, updated} = Sessions.update_session(session, %{status: "transcribing"})
+
+      assert updated.status == "transcribing"
+      refute updated.corrections["replacements"]
     end
   end
 end

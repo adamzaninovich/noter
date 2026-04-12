@@ -68,10 +68,45 @@ defmodule Noter.Sessions do
   end
 
   def update_session(%Session{} = session, attrs) do
-    session
-    |> Session.changeset(attrs)
-    |> Repo.update()
-    |> broadcast_session_update()
+    session = Repo.preload(session, :campaign)
+
+    result =
+      Repo.transaction(fn ->
+        with {:ok, session} <-
+               session
+               |> Session.changeset(attrs)
+               |> Repo.update(),
+             {:ok, session} <- apply_campaign_replacements(session, attrs) do
+          session
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, session} -> {:ok, session} |> broadcast_session_update()
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def atomic_advance_to_reviewing(session_id) do
+    case Repo.transaction(fn ->
+           case Repo.update_all(
+                  from(s in Session, where: s.id == ^session_id and s.status == "transcribing"),
+                  set: [status: "reviewing"]
+                ) do
+             {1, _} ->
+               session = Session |> Repo.get!(session_id) |> Repo.preload(:campaign)
+               {:ok, _session} = apply_campaign_replacements(session, %{status: "reviewing"})
+               {:ok, :advanced}
+
+             {0, _} ->
+               {:ok, :already_reviewing}
+           end
+         end) do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   def update_transcription(%Session{} = session, attrs) do

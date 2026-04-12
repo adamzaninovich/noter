@@ -1,6 +1,8 @@
 defmodule Noter.StateMachineTest do
   use Noter.DataCase, async: false
 
+  @moduletag capture_log: true
+
   alias Noter.Campaigns
   alias Noter.Sessions
   alias Noter.Settings

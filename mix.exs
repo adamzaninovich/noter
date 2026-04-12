@@ -4,7 +4,7 @@ defmodule Noter.MixProject do
   def project do
     [
       app: :noter,
-      version: "1.4.1",
+      version: "1.5.0",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -70,7 +70,8 @@ defmodule Noter.MixProject do
       {:packmatic, "~> 2.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:tidewave, "~> 0.5", only: :dev},
-      {:excoveralls, "~> 0.18", only: :test}
+      {:excoveralls, "~> 0.18", only: :test},
+      {:mox, "~> 1.0", only: :test}
     ]
   end
 

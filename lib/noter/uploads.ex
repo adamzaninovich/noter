@@ -28,22 +28,17 @@ defmodule Noter.Uploads do
         session,
         campaign,
         zip_path,
-        aac_path,
         vocab_path,
         on_progress \\ fn _ -> :ok end
       ) do
     base_dir = session_dir(session.id)
     extracted_dir = Path.join(base_dir, "extracted")
     renamed_dir = Path.join(base_dir, "renamed")
+    wav_dest = Path.join(base_dir, "merged.wav")
+    vocab_dest = Path.join(base_dir, "vocab.txt")
 
     File.mkdir_p!(base_dir)
     File.mkdir_p!(extracted_dir)
-
-    on_progress.("Copying audio file...")
-    aac_dest = Path.join(base_dir, "merged.aac")
-    vocab_dest = Path.join(base_dir, "vocab.txt")
-
-    if aac_path, do: move_file!(aac_path, aac_dest)
 
     if vocab_path do
       on_progress.("Copying vocabulary file...")
@@ -56,31 +51,63 @@ defmodule Noter.Uploads do
       on_progress.("Renaming tracks...")
       {:ok, renamed} = Prep.rename_flacs(extracted_dir, renamed_dir, campaign.player_map)
 
-      on_progress.("Cleaning up temporary files...")
-      log_file_op(File.rm(zip_path), "rm #{zip_path}")
-      log_file_op(File.rm_rf(extracted_dir), "rm_rf #{extracted_dir}")
-      {:ok, renamed}
+      on_progress.("Mixing and normalizing audio...")
+
+      with :ok <- mix_tracks_to_wav(renamed_dir, wav_dest) do
+        on_progress.("Cleaning up temporary files...")
+        log_file_op(File.rm(zip_path), "rm #{zip_path}")
+        log_file_op(File.rm_rf(extracted_dir), "rm_rf #{extracted_dir}")
+        {:ok, renamed}
+      end
+    end
+  end
+
+  def mix_tracks_to_wav(renamed_dir, output_wav_path) do
+    flac_files = Prep.find_flac_files(renamed_dir) |> Enum.sort()
+
+    if flac_files == [] do
+      {:error, "no FLAC files found in #{renamed_dir}"}
+    else
+      count = length(flac_files)
+
+      input_args = Enum.flat_map(flac_files, fn path -> ["-i", path] end)
+
+      anull_filters =
+        flac_files
+        |> Enum.with_index()
+        |> Enum.map_join(";", fn {_path, i} -> "[#{i}:a]anull[aud#{i}]" end)
+
+      mix_inputs = Enum.map_join(0..(count - 1), "", fn i -> "[aud#{i}]" end)
+      filter_complex = "#{anull_filters};#{mix_inputs}amix=#{count},dynaudnorm[aud]"
+
+      args =
+        ["-y"] ++
+          input_args ++
+          ["-filter_complex", filter_complex, "-map", "[aud]", "-ac", "1", output_wav_path]
+
+      case Noter.SystemCmd.cmd("ffmpeg", args, stderr_to_stdout: true) do
+        {_, 0} ->
+          :ok
+
+        {out, code} ->
+          {:error, "ffmpeg mix failed (exit #{code}): #{String.slice(out, -200..-1)}"}
+      end
     end
   end
 
   def generate_peaks(session_id) do
     base_dir = session_dir(session_id)
-    aac_path = Path.join(base_dir, "merged.aac")
     wav_path = Path.join(base_dir, "merged.wav")
     peaks_path = Path.join(base_dir, "peaks.json")
 
-    with {_, 0} <-
-           System.cmd("ffmpeg", ["-y", "-i", aac_path, "-ac", "1", wav_path],
-             stderr_to_stdout: true
-           ),
-         {_, 0} <-
-           System.cmd(
-             "audiowaveform",
-             ["-i", wav_path, "-o", peaks_path, "--pixels-per-second", "10", "-b", "8"],
-             stderr_to_stdout: true
-           ) do
-      {:ok, peaks_path}
-    else
+    case Noter.SystemCmd.cmd(
+           "audiowaveform",
+           ["-i", wav_path, "-o", peaks_path, "--pixels-per-second", "10", "-b", "8"],
+           stderr_to_stdout: true
+         ) do
+      {_, 0} ->
+        {:ok, peaks_path}
+
       {out, code} ->
         {:error, "peaks generation failed (exit #{code}): #{String.slice(out, -200..-1)}"}
     end
@@ -89,7 +116,7 @@ defmodule Noter.Uploads do
   def get_duration(session_id) do
     wav_path = Path.join(session_dir(session_id), "merged.wav")
 
-    case System.cmd("ffprobe", [
+    case Noter.SystemCmd.cmd("ffprobe", [
            "-v",
            "quiet",
            "-show_entries",
@@ -121,10 +148,9 @@ defmodule Noter.Uploads do
     flac_files = Prep.find_flac_files(renamed_dir)
     wav_path = Path.join(base_dir, "merged.wav")
     trimmed_wav = Path.join(trimmed_dir, "merged.wav")
-    trimmed_m4a = Path.join(trimmed_dir, "merged.m4a")
     duration = end_seconds - start_seconds
 
-    jobs =
+    flac_jobs =
       Enum.map(flac_files, fn path ->
         basename = Path.basename(path, ".flac")
         character_name = Prep.resolve_character(basename, session.campaign.player_map)
@@ -132,30 +158,41 @@ defmodule Noter.Uploads do
         {"#{character_name}.flac", path, output_path}
       end)
 
-    all_clip_jobs = jobs ++ [{"merged.wav", wav_path, trimmed_wav}]
+    wav_job = [{"merged.wav", wav_path, trimmed_wav}]
 
-    with :ok <- parallel_clip(all_clip_jobs, start_seconds, duration, on_progress),
-         :ok <-
-           ffmpeg_with_progress(
-             trimmed_wav,
-             trimmed_m4a,
-             [],
-             ["-c:a", "aac", "-b:a", "192k"],
-             duration,
-             fn pct -> on_progress.("merged.m4a", pct) end
-           ) do
-      log_file_op(File.rm(trimmed_wav), "rm #{trimmed_wav}")
-      :ok
-    else
+    result = parallel_clip(flac_jobs ++ wav_job, start_seconds, duration, on_progress)
+
+    case result do
+      :ok ->
+        :ok
+
       error ->
         File.rm_rf(trimmed_dir)
         error
     end
   end
 
-  def cleanup_wav(session_id) do
-    path = Path.join(session_dir(session_id), "merged.wav")
-    log_file_op(File.rm(path), "rm #{path}")
+  def encode_merged_m4a(session_id, duration, on_progress \\ fn _pct -> :ok end) do
+    base_dir = session_dir(session_id)
+    trimmed_dir = Path.join(base_dir, "trimmed")
+    trimmed_wav = Path.join(trimmed_dir, "merged.wav")
+    trimmed_m4a = Path.join(trimmed_dir, "merged.m4a")
+
+    case ffmpeg_with_progress(
+           trimmed_wav,
+           trimmed_m4a,
+           [],
+           ["-c:a", "aac", "-b:a", "192k"],
+           duration,
+           on_progress
+         ) do
+      :ok ->
+        log_file_op(File.rm(trimmed_wav), "rm #{trimmed_wav}")
+        :ok
+
+      error ->
+        error
+    end
   end
 
   defp parallel_clip(jobs, start_seconds, duration, on_progress) do
@@ -192,7 +229,7 @@ defmodule Noter.Uploads do
          on_percent
        ) do
     total_us = trunc(duration_seconds * 1_000_000)
-    ffmpeg = System.find_executable("ffmpeg") || "ffmpeg"
+    ffmpeg = Noter.SystemCmd.find_executable("ffmpeg") || "ffmpeg"
 
     args =
       ["-y", "-nostats", "-loglevel", "error"] ++
@@ -202,7 +239,7 @@ defmodule Noter.Uploads do
         ["-progress", "pipe:1", output]
 
     port =
-      Port.open({:spawn_executable, ffmpeg}, [
+      Noter.SystemCmd.open_port({:spawn_executable, ffmpeg}, [
         :binary,
         :exit_status,
         :stderr_to_stdout,

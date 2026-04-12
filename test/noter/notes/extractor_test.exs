@@ -1,6 +1,8 @@
 defmodule Noter.Notes.ExtractorTest do
   use Noter.DataCase, async: false
 
+  @moduletag capture_log: true
+
   alias Noter.Notes.Extractor
   alias Noter.Settings
 
