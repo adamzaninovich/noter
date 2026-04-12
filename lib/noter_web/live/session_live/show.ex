@@ -185,11 +185,11 @@ defmodule NoterWeb.SessionLive.Show do
                   <button data-set-start type="button" class="btn btn-outline btn-sm">
                     <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" /> Set Start
                   </button>
-                  <button data-preview-start type="button" class="btn btn-outline btn-sm">
-                    <.icon name="hero-play" class="size-4" /> Preview Start
+                  <button data-jump-start type="button" class="btn btn-outline btn-sm">
+                    <.icon name="hero-backward" class="size-4" /> Jump to Start
                   </button>
-                  <button data-preview-end type="button" class="btn btn-outline btn-sm">
-                    Preview End <.icon name="hero-play" class="size-4" />
+                  <button data-jump-end type="button" class="btn btn-outline btn-sm">
+                    Jump to End <.icon name="hero-forward" class="size-4" />
                   </button>
                   <button data-set-end type="button" class="btn btn-outline btn-sm">
                     Set End <.icon name="hero-arrow-left-end-on-rectangle" class="size-4" />
@@ -1087,19 +1087,16 @@ defmodule NoterWeb.SessionLive.Show do
                 }
               })
 
-              // Preview buttons
-              el.querySelector("[data-preview-start]").addEventListener("click", () => {
+              // Jump to start/end buttons
+              el.querySelector("[data-jump-start]").addEventListener("click", () => {
                 if (this.region) {
                   ws.setTime(this.region.start)
-                  ws.play()
                 }
               })
 
-              el.querySelector("[data-preview-end]").addEventListener("click", () => {
+              el.querySelector("[data-jump-end]").addEventListener("click", () => {
                 if (this.region) {
-                  const seekTo = Math.max(this.region.start, this.region.end - 3)
-                  ws.setTime(seekTo)
-                  ws.play()
+                  ws.setTime(this.region.end)
                 }
               })
 
