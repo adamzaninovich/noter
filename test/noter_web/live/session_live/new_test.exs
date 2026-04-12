@@ -1,5 +1,5 @@
 defmodule NoterWeb.SessionLive.NewTest do
-  use NoterWeb.ConnCase, async: true
+  use NoterWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
 

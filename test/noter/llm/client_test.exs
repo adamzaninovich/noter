@@ -1,6 +1,8 @@
 defmodule Noter.LLM.ClientTest do
   use Noter.DataCase, async: false
 
+  @moduletag capture_log: true
+
   alias Noter.LLM.Client
   alias Noter.Settings
 

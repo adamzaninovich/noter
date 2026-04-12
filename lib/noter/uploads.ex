@@ -85,7 +85,7 @@ defmodule Noter.Uploads do
           input_args ++
           ["-filter_complex", filter_complex, "-map", "[aud]", "-ac", "1", output_wav_path]
 
-      case System.cmd("ffmpeg", args, stderr_to_stdout: true) do
+      case Noter.SystemCmd.cmd("ffmpeg", args, stderr_to_stdout: true) do
         {_, 0} ->
           :ok
 
@@ -100,7 +100,7 @@ defmodule Noter.Uploads do
     wav_path = Path.join(base_dir, "merged.wav")
     peaks_path = Path.join(base_dir, "peaks.json")
 
-    case System.cmd(
+    case Noter.SystemCmd.cmd(
            "audiowaveform",
            ["-i", wav_path, "-o", peaks_path, "--pixels-per-second", "10", "-b", "8"],
            stderr_to_stdout: true
@@ -116,7 +116,7 @@ defmodule Noter.Uploads do
   def get_duration(session_id) do
     wav_path = Path.join(session_dir(session_id), "merged.wav")
 
-    case System.cmd("ffprobe", [
+    case Noter.SystemCmd.cmd("ffprobe", [
            "-v",
            "quiet",
            "-show_entries",
@@ -229,7 +229,7 @@ defmodule Noter.Uploads do
          on_percent
        ) do
     total_us = trunc(duration_seconds * 1_000_000)
-    ffmpeg = System.find_executable("ffmpeg") || "ffmpeg"
+    ffmpeg = Noter.SystemCmd.find_executable("ffmpeg") || "ffmpeg"
 
     args =
       ["-y", "-nostats", "-loglevel", "error"] ++
@@ -239,7 +239,7 @@ defmodule Noter.Uploads do
         ["-progress", "pipe:1", output]
 
     port =
-      Port.open({:spawn_executable, ffmpeg}, [
+      Noter.SystemCmd.open_port({:spawn_executable, ffmpeg}, [
         :binary,
         :exit_status,
         :stderr_to_stdout,

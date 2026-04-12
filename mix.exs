@@ -70,7 +70,8 @@ defmodule Noter.MixProject do
       {:packmatic, "~> 2.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:tidewave, "~> 0.5", only: :dev},
-      {:excoveralls, "~> 0.18", only: :test}
+      {:excoveralls, "~> 0.18", only: :test},
+      {:mox, "~> 1.0", only: :test}
     ]
   end
 

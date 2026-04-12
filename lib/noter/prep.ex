@@ -10,7 +10,7 @@ defmodule Noter.Prep do
   Extracts a zip archive into `dest_dir`.
   """
   def extract_zip(zip_path, dest_dir) do
-    case System.cmd("unzip", ["-o", zip_path, "-d", dest_dir], stderr_to_stdout: true) do
+    case Noter.SystemCmd.cmd("unzip", ["-o", zip_path, "-d", dest_dir], stderr_to_stdout: true) do
       {_, 0} -> :ok
       {output, code} -> {:error, "unzip failed (exit #{code}): #{output}"}
     end
@@ -71,7 +71,7 @@ defmodule Noter.Prep do
   def ffmpeg_clip(input, output, start_ts, end_ts) do
     args = ["-y", "-i", input, "-ss", start_ts, "-to", end_ts, "-c", "copy", output]
 
-    case System.cmd("ffmpeg", args, stderr_to_stdout: true) do
+    case Noter.SystemCmd.cmd("ffmpeg", args, stderr_to_stdout: true) do
       {_, 0} -> :ok
       {out, code} -> {:error, "ffmpeg failed (exit #{code}) for #{Path.basename(input)}: #{out}"}
     end

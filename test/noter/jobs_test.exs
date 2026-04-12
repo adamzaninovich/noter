@@ -1,6 +1,11 @@
 defmodule Noter.JobsTest do
   use Noter.DataCase, async: false
 
+  import Mox
+
+  setup :set_mox_from_context
+  setup :verify_on_exit!
+
   alias Noter.Campaigns
   alias Noter.Jobs
   alias Noter.Sessions
@@ -20,6 +25,22 @@ defmodule Noter.JobsTest do
 
   describe "start_m4a_encode/2" do
     setup %{session: session} do
+      stub(Noter.SystemCmd.Mock, :find_executable, fn "ffmpeg" -> "/usr/bin/ffmpeg" end)
+
+      stub(Noter.SystemCmd.Mock, :open_port, fn {:spawn_executable, _}, _opts ->
+        caller = self()
+        output_ref = make_ref()
+
+        spawn(fn ->
+          # Keep the fake ffmpeg "running" long enough for the test to assert :already_running
+          Process.sleep(50)
+          send(caller, {output_ref, {:data, "out_time_us=60000000\n"}})
+          send(caller, {output_ref, {:exit_status, 0}})
+        end)
+
+        output_ref
+      end)
+
       session_dir = Uploads.session_dir(session.id)
       trimmed_dir = Path.join(session_dir, "trimmed")
       File.mkdir_p!(trimmed_dir)
@@ -36,6 +57,11 @@ defmodule Noter.JobsTest do
 
       second = Jobs.start_m4a_encode(session, session.duration_seconds)
       assert second == {:error, :already_running}
+
+      # Wait for the spawned task to finish so it doesn't outlive the test sandbox
+      [{pid, _}] = Registry.lookup(Noter.JobRegistry, {session.id, :m4a_encode})
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5_000
     end
   end
 

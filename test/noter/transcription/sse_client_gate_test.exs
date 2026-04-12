@@ -3,7 +3,7 @@ defmodule Noter.Transcription.SSEClientGateTest do
   Tests for the gate check that prevents advancing to "reviewing" until
   both transcription and M4A encoding are complete.
   """
-  use Noter.DataCase, async: true
+  use Noter.DataCase, async: false
 
   alias Noter.Campaigns
   alias Noter.Sessions
