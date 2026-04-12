@@ -1,6 +1,8 @@
 defmodule Noter.Notes.PipelineTest do
   use Noter.DataCase, async: false
 
+  @moduletag capture_log: true
+
   alias Noter.{Campaigns, Jobs, Sessions}
   alias Noter.Notes.Pipeline
   alias Noter.Settings

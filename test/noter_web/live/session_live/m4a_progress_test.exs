@@ -39,8 +39,16 @@ defmodule NoterWeb.SessionLive.M4aProgressTest do
   describe "M4A encoding card during transcription" do
     test "shows M4A encoding progress card when m4a_complete? is false",
          %{conn: conn, campaign: campaign, session: session} do
-      {:ok, session} = Sessions.update_session(session, %{status: "transcribing"})
-      session = Noter.Repo.preload(session, :campaign)
+      # Use update_transcription to set transcription_job_id (changeset doesn't include it).
+      # This makes reconnect_transcription take the poll_job path instead of
+      # calling start_transcription_submit (which would crash).
+      {:ok, session} =
+        Sessions.update_transcription(session, %{
+          status: "transcribing",
+          transcription_job_id: "fake-job-id"
+        })
+
+      Noter.Settings.set("transcription_url", nil)
 
       {:ok, view, _html} =
         live(conn, ~p"/campaigns/#{campaign.slug}/sessions/#{session.slug}")
@@ -81,7 +89,14 @@ defmodule NoterWeb.SessionLive.M4aProgressTest do
 
   describe "both-done gate in LiveView" do
     setup %{session: session} do
-      {:ok, session} = Sessions.update_session(session, %{status: "transcribing"})
+      {:ok, session} =
+        Sessions.update_transcription(session, %{
+          status: "transcribing",
+          transcription_job_id: "fake-job-id"
+        })
+
+      Noter.Settings.set("transcription_url", nil)
+
       {:ok, session: session}
     end
 

@@ -1,5 +1,5 @@
 defmodule Noter.SessionsTest do
-  use Noter.DataCase, async: true
+  use Noter.DataCase, async: false
 
   alias Noter.Campaigns
   alias Noter.Sessions

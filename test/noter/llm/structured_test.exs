@@ -1,6 +1,8 @@
 defmodule Noter.LLM.StructuredTest do
   use Noter.DataCase, async: false
 
+  @moduletag capture_log: true
+
   alias Noter.LLM.Structured
   alias Noter.Settings
 
