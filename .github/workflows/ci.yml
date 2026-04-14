@@ -10,6 +10,7 @@ env:
   MIX_ENV: test
   ELIXIR_VERSION: "1.19.5"
   OTP_VERSION: "28.4.1"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   test:
