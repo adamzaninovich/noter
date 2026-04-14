@@ -2007,7 +2007,19 @@ defmodule NoterWeb.SessionLive.Show do
           assign(socket, :active_job, :transcribing)
 
         {:error, reason} ->
-          put_flash(socket, :error, "Failed to check transcription status: #{reason}")
+          reason_str = to_string(reason)
+
+          if String.contains?(reason_str, "Job not found") do
+            Sessions.update_transcription(session, %{transcription_job_id: nil})
+            Jobs.start_transcription_submit(session)
+
+            socket
+            |> put_flash(:info, "Previous transcription job expired. Restarting transcription...")
+            |> assign(:active_job, :transcribing)
+            |> assign(:transcription_status, :uploading)
+          else
+            put_flash(socket, :error, "Failed to check transcription status: #{reason}")
+          end
       end
     end
   end
