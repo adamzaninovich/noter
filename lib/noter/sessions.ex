@@ -243,7 +243,8 @@ defmodule Noter.Sessions do
     |> Session.notes_changeset(%{
       status: "reviewing",
       notes_error: nil,
-      transcript_srt: nil
+      transcript_srt: nil,
+      chunk_facts: %{}
     })
     |> Repo.update()
     |> broadcast_session_update()
@@ -282,5 +283,22 @@ defmodule Noter.Sessions do
       |> Map.delete(find)
 
     update_corrections(session, Session.put_corrections(session, "replacements", replacements))
+  end
+
+  def save_chunk_fact(session_id, chunk_index, facts) do
+    patch = Jason.encode!(%{to_string(chunk_index) => facts})
+
+    Session
+    |> where([s], s.id == ^session_id)
+    |> update([s], set: [chunk_facts: fragment("json_patch(chunk_facts, ?)", ^patch)])
+    |> Repo.update_all([])
+
+    :ok
+  end
+
+  def clear_chunk_facts(%Session{} = session) do
+    session
+    |> Session.notes_changeset(%{chunk_facts: %{}})
+    |> Repo.update()
   end
 end
