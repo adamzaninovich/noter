@@ -25,7 +25,8 @@ defmodule Noter.Notes.ExtractorTest do
     "decisions" => [],
     "character_moments" => [],
     "loose_threads" => [],
-    "inventory_rewards" => []
+    "inventory_rewards" => [],
+    "banter" => []
   }
 
   defp setup_settings do
@@ -65,6 +66,8 @@ defmodule Noter.Notes.ExtractorTest do
         schema = decoded["response_format"]["json_schema"]["schema"]
         assert "events" in schema["required"]
         assert "npcs" in schema["required"]
+        assert "banter" in schema["required"]
+        assert Map.has_key?(schema["properties"], "banter")
         Req.Test.json(conn, chat_response(Jason.encode!(@valid_facts)))
       end
 

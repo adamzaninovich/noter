@@ -183,5 +183,29 @@ defmodule Noter.Notes.AggregatorTest do
         assert result[key] == []
       end
     end
+
+    test "aggregates and deduplicates banter entries across chunks" do
+      entry = %{"text" => "Did you see the game last night?"}
+
+      input = [
+        {0, facts(%{"banter" => [entry, %{"text" => "Classic!"}]})},
+        {1, facts(%{"banter" => [entry]})}
+      ]
+
+      result = Aggregator.aggregate(input)
+      assert length(result["banter"]) == 2
+      assert Enum.any?(result["banter"], &(&1["text"] == "Did you see the game last night?"))
+      assert Enum.any?(result["banter"], &(&1["text"] == "Classic!"))
+    end
+
+    test "banter dedup is case and punctuation insensitive" do
+      input = [
+        {0, facts(%{"banter" => [%{"text" => "Ha, classic!"}]})},
+        {1, facts(%{"banter" => [%{"text" => "ha classic"}]})}
+      ]
+
+      result = Aggregator.aggregate(input)
+      assert length(result["banter"]) == 1
+    end
   end
 end

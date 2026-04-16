@@ -5,7 +5,7 @@ defmodule Noter.Notes.Aggregator do
   Ported from the n8n "Aggregate Facts" JavaScript node.
   """
 
-  @text_keys ~w(events info_learned combat decisions character_moments loose_threads inventory_rewards)
+  @text_keys ~w(events info_learned combat decisions character_moments loose_threads inventory_rewards banter)
   @entity_keys ~w(npcs locations)
 
   @doc """

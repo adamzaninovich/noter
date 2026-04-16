@@ -19,7 +19,8 @@ defmodule Noter.Notes.Extractor do
       "decisions",
       "character_moments",
       "loose_threads",
-      "inventory_rewards"
+      "inventory_rewards",
+      "banter"
     ],
     "properties" => %{
       "range" => %{"type" => "string"},
@@ -102,6 +103,15 @@ defmodule Noter.Notes.Extractor do
         }
       },
       "inventory_rewards" => %{
+        "type" => "array",
+        "items" => %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => ["text"],
+          "properties" => %{"text" => %{"type" => "string"}}
+        }
+      },
+      "banter" => %{
         "type" => "array",
         "items" => %{
           "type" => "object",
