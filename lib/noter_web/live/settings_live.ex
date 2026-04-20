@@ -61,10 +61,12 @@ defmodule NoterWeb.SettingsLive do
     end
   end
 
+  @impl true
   def handle_event("validate", %{"settings" => params}, socket) do
     {:noreply, assign(socket, :form, to_form(params, as: :settings))}
   end
 
+  @impl true
   def handle_event("test_transcription", _params, socket) do
     url = socket.assigns.form[:transcription_url].value
 
@@ -85,11 +87,24 @@ defmodule NoterWeb.SettingsLive do
     end
   end
 
+  @impl true
   def handle_event("fetch_models", %{"role" => role}, socket)
       when role in ~w(extraction writing) do
-    role_atom = String.to_existing_atom(role)
+    base_url_key = "llm_#{role}_base_url"
+    api_key_key = "llm_#{role}_api_key"
 
-    case Client.list_models(role_atom) do
+    base_url = socket.assigns.form[String.to_existing_atom(base_url_key)].value
+    form_api_key = socket.assigns.form[String.to_existing_atom(api_key_key)].value
+
+    api_key =
+      case form_api_key do
+        val when is_binary(val) and val != "" -> val
+        _ -> Settings.get(api_key_key)
+      end
+
+    plug = Application.get_env(:noter, :fetch_models_plug, [])
+
+    case Client.list_models(base_url, api_key, plug) do
       {:ok, ids} ->
         models_key = String.to_existing_atom("#{role}_models")
 
