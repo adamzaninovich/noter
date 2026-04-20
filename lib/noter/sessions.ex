@@ -290,7 +290,9 @@ defmodule Noter.Sessions do
 
     Session
     |> where([s], s.id == ^session_id)
-    |> update([s], set: [chunk_facts: fragment("json_patch(chunk_facts, ?)", ^patch)])
+    |> update([s],
+      set: [chunk_facts: fragment("json_patch(coalesce(chunk_facts, '{}'), ?)", ^patch)]
+    )
     |> Repo.update_all([])
 
     :ok
