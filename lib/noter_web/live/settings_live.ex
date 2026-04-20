@@ -87,7 +87,7 @@ defmodule NoterWeb.SettingsLive do
 
   def handle_event("fetch_models", %{"role" => role}, socket)
       when role in ~w(extraction writing) do
-    role_atom = String.to_existing_atom(role)
+    role_atom = String.to_atom(role)
 
     case Client.list_models(role_atom) do
       {:ok, ids} ->
