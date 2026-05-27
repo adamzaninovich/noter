@@ -95,12 +95,7 @@ defmodule NoterWeb.SettingsLive do
 
     base_url = socket.assigns.form[String.to_existing_atom(base_url_key)].value
     form_api_key = socket.assigns.form[String.to_existing_atom(api_key_key)].value
-
-    api_key =
-      case form_api_key do
-        val when is_binary(val) and val != "" -> val
-        _ -> Settings.get(api_key_key)
-      end
+    api_key = resolve_api_key(form_api_key, api_key_key)
 
     case Client.list_models(base_url, api_key) do
       {:ok, ids} ->
@@ -115,6 +110,11 @@ defmodule NoterWeb.SettingsLive do
         {:noreply, put_flash(socket, :error, "Failed to fetch models: #{reason}")}
     end
   end
+
+  defp resolve_api_key(form_value, _key) when is_binary(form_value) and form_value != "",
+    do: form_value
+
+  defp resolve_api_key(_form_value, key), do: Settings.get(key)
 
   defp parse_numeric(""), do: nil
 
