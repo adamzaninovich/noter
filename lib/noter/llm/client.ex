@@ -161,9 +161,11 @@ defmodule Noter.LLM.Client do
     if is_nil(base_url) or base_url == "" do
       {:error, "base_url is required"}
     else
+      normalized_base_url = String.trim_trailing(base_url, "/")
+
       req_opts =
         [
-          url: "#{base_url}/models",
+          url: "#{normalized_base_url}/models",
           method: :get,
           headers: auth_headers(api_key),
           receive_timeout: 10_000,
