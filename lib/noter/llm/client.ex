@@ -162,6 +162,7 @@ defmodule Noter.LLM.Client do
       {:error, "base_url is required"}
     else
       normalized_base_url = String.trim_trailing(base_url, "/")
+      merged_opts = Keyword.merge(runtime_opts(), opts)
 
       req_opts =
         [
@@ -171,7 +172,7 @@ defmodule Noter.LLM.Client do
           receive_timeout: 10_000,
           retry: false
         ]
-        |> maybe_put_plug(opts)
+        |> maybe_put_plug(merged_opts)
 
       case Req.request(req_opts) do
         {:ok, %{status: 200, body: %{"data" => models}}} ->
@@ -270,4 +271,6 @@ defmodule Noter.LLM.Client do
       plug -> Keyword.put(req_opts, :plug, plug)
     end
   end
+
+  defp runtime_opts, do: Application.get_env(:noter, __MODULE__, [])
 end

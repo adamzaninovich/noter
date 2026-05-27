@@ -11,8 +11,7 @@ defmodule NoterWeb.SettingsLiveTest do
     Settings.set("llm_extraction_api_key", "saved-api-key")
     Settings.set("llm_writing_base_url", "http://saved-host:1234/v1")
     Settings.set("llm_writing_api_key", "saved-writing-key")
-    Application.put_env(:noter, :fetch_models_plug, [])
-    on_exit(fn -> Application.delete_env(:noter, :fetch_models_plug) end)
+    on_exit(fn -> Application.delete_env(:noter, Noter.LLM.Client) end)
     :ok
   end
 
@@ -34,7 +33,7 @@ defmodule NoterWeb.SettingsLiveTest do
     )
     |> render_change()
 
-    Application.put_env(:noter, :fetch_models_plug, plug: captured)
+    Application.put_env(:noter, Noter.LLM.Client, plug: captured)
 
     view
     |> element("button[phx-click='fetch_models'][phx-value-role='extraction']")
@@ -59,7 +58,7 @@ defmodule NoterWeb.SettingsLiveTest do
     |> form("#settings-form", settings: %{"llm_extraction_api_key" => ""})
     |> render_change()
 
-    Application.put_env(:noter, :fetch_models_plug, plug: captured)
+    Application.put_env(:noter, Noter.LLM.Client, plug: captured)
 
     view
     |> element("button[phx-click='fetch_models'][phx-value-role='extraction']")
@@ -83,7 +82,7 @@ defmodule NoterWeb.SettingsLiveTest do
     |> form("#settings-form", settings: %{"llm_extraction_api_key" => "form-api-key"})
     |> render_change()
 
-    Application.put_env(:noter, :fetch_models_plug, plug: captured)
+    Application.put_env(:noter, Noter.LLM.Client, plug: captured)
 
     view
     |> element("button[phx-click='fetch_models'][phx-value-role='extraction']")

@@ -102,9 +102,7 @@ defmodule NoterWeb.SettingsLive do
         _ -> Settings.get(api_key_key)
       end
 
-    plug = Application.get_env(:noter, :fetch_models_plug, [])
-
-    case Client.list_models(base_url, api_key, plug) do
+    case Client.list_models(base_url, api_key) do
       {:ok, ids} ->
         models_key = String.to_existing_atom("#{role}_models")
 
