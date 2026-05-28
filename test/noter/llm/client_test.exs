@@ -205,10 +205,8 @@ defmodule Noter.LLM.ClientTest do
     end
   end
 
-  describe "list_models/2" do
+  describe "list_models/3" do
     test "returns sorted model IDs" do
-      setup_settings(:extraction)
-
       plug =
         plug_for(fn conn ->
           Req.Test.json(conn, %{
@@ -221,12 +219,10 @@ defmodule Noter.LLM.ClientTest do
         end)
 
       assert {:ok, ["model-a", "model-b", "model-c"]} =
-               Client.list_models(:extraction, plug: plug)
+               Client.list_models("http://localhost:1234/v1", "test-key", plug: plug)
     end
 
     test "returns error on failure" do
-      setup_settings(:extraction)
-
       plug =
         plug_for(fn conn ->
           conn
@@ -234,13 +230,18 @@ defmodule Noter.LLM.ClientTest do
           |> Req.Test.json(%{"error" => "internal"})
         end)
 
-      assert {:error, msg} = Client.list_models(:extraction, plug: plug)
+      assert {:error, msg} =
+               Client.list_models("http://localhost:1234/v1", "test-key", plug: plug)
+
       assert msg =~ "API error 500"
     end
 
-    test "returns error when base_url not configured" do
-      assert {:error, msg} = Client.list_models(:extraction)
-      assert msg =~ "not configured"
+    test "returns error when base_url is blank" do
+      assert {:error, msg} = Client.list_models("", "key")
+      assert msg =~ "base_url is required"
+
+      assert {:error, msg} = Client.list_models(nil, "key")
+      assert msg =~ "base_url is required"
     end
   end
 end

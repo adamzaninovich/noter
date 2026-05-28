@@ -157,17 +157,22 @@ defmodule Noter.LLM.Client do
     end
   end
 
-  def list_models(role, opts \\ []) when role in [:extraction, :writing] do
-    with {:ok, config} <- load_config(role) do
+  def list_models(base_url, api_key, opts \\ []) do
+    if is_nil(base_url) or base_url == "" do
+      {:error, "base_url is required"}
+    else
+      normalized_base_url = String.trim_trailing(base_url, "/")
+      merged_opts = Keyword.merge(runtime_opts(), opts)
+
       req_opts =
         [
-          url: "#{config.base_url}/models",
+          url: "#{normalized_base_url}/models",
           method: :get,
-          headers: auth_headers(config.api_key),
+          headers: auth_headers(api_key),
           receive_timeout: 10_000,
           retry: false
         ]
-        |> maybe_put_plug(opts)
+        |> maybe_put_plug(merged_opts)
 
       case Req.request(req_opts) do
         {:ok, %{status: 200, body: %{"data" => models}}} ->
@@ -266,4 +271,6 @@ defmodule Noter.LLM.Client do
       plug -> Keyword.put(req_opts, :plug, plug)
     end
   end
+
+  defp runtime_opts, do: Application.get_env(:noter, __MODULE__, [])
 end
