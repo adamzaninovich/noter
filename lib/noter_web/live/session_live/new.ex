@@ -125,6 +125,7 @@ defmodule NoterWeb.SessionLive.New do
                       id="session-vocab"
                       rows="6"
                       phx-hook="DropVocab"
+                      phx-update="ignore"
                       placeholder="One term per line. Drop a vocab.txt file here to replace."
                       class="textarea textarea-bordered w-full font-mono text-sm"
                     >{@vocab}</textarea>
