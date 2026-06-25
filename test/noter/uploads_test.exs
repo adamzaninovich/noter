@@ -85,6 +85,50 @@ defmodule Noter.UploadsTest do
 
       File.rm_rf!(tmp_dir)
     end
+
+    test "does not write vocab.txt when vocab text is blank", %{
+      campaign: campaign,
+      session: session
+    } do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "noter_upload_test_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+
+      renamed_dir = Path.join(Uploads.session_dir(session.id), "renamed")
+      File.mkdir_p!(renamed_dir)
+
+      flac_path = Path.join(renamed_dir, "coolgamer.flac")
+      File.write!(flac_path, "fake flac content")
+
+      zip_path = Path.join(tmp_dir, "recording.zip")
+
+      {:ok, _} =
+        :zip.create(~c"#{zip_path}", [{~c"coolgamer.flac", flac_path}], cwd: ~c"#{tmp_dir}")
+
+      expect(Noter.SystemCmd.Mock, :cmd, fn "unzip", ["-o", ^zip_path, "-d", _], _opts ->
+        File.mkdir_p!(Path.join(Uploads.session_dir(session.id), "extracted"))
+
+        File.cp!(
+          flac_path,
+          Path.join(Uploads.session_dir(session.id), "extracted/coolgamer.flac")
+        )
+
+        {"", 0}
+      end)
+
+      expect(Noter.SystemCmd.Mock, :cmd, fn "ffmpeg", args, _opts ->
+        output_path = Enum.at(args, -1)
+        File.write!(output_path, "fake wav content")
+        {"", 0}
+      end)
+
+      {:ok, _renamed} = Uploads.process_uploads(session, campaign, zip_path, "   ")
+
+      refute File.exists?(Path.join(Uploads.session_dir(session.id), "vocab.txt"))
+
+      File.rm_rf!(tmp_dir)
+    end
   end
 
   describe "mix_tracks_to_wav/2" do
