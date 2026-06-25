@@ -167,6 +167,10 @@ defmodule NoterWeb.SessionLive.New do
     {:noreply, assign(socket, form: to_form(changeset))}
   end
 
+  def handle_event("vocab_file_rejected", %{"name" => name}, socket) do
+    {:noreply, put_flash(socket, :error, "#{name} is not a text file. Please drop a .txt file.")}
+  end
+
   def handle_event("cancel-upload", %{"ref" => ref, "upload-ref" => upload_ref}, socket) do
     {:noreply, cancel_upload_by_ref(socket, ref, upload_ref)}
   end

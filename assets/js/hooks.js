@@ -34,12 +34,16 @@ export const DropVocab = {
       e.preventDefault()
       this.el.classList.remove("border-primary")
       const file = e.dataTransfer.files[0]
-      if (file) {
-        file.text().then((text) => {
-          this.el.value = text
-          this.el.dispatchEvent(new Event("input", { bubbles: true }))
-        })
+      if (!file) return
+      const isText = file.type.startsWith("text/") || file.name.toLowerCase().endsWith(".txt")
+      if (!isText) {
+        this.pushEvent("vocab_file_rejected", { name: file.name })
+        return
       }
+      file.text().then((text) => {
+        this.el.value = text
+        this.el.dispatchEvent(new Event("input", { bubbles: true }))
+      })
     })
   },
 }

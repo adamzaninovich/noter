@@ -54,4 +54,15 @@ defmodule NoterWeb.SessionLive.NewTest do
     assert has_element?(view, "#session-vocab")
     refute has_element?(view, "#session-vocab", "Tharivol")
   end
+
+  test "flashes an error when a non-text file is dropped", %{conn: conn, campaign: campaign} do
+    {:ok, view, _html} = live(conn, ~p"/campaigns/#{campaign.slug}/sessions/new")
+
+    html =
+      view
+      |> element("#session-vocab")
+      |> render_hook("vocab_file_rejected", %{"name" => "photo.jpg"})
+
+    assert html =~ "photo.jpg is not a text file"
+  end
 end
