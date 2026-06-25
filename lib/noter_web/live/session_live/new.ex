@@ -4,6 +4,7 @@ defmodule NoterWeb.SessionLive.New do
   alias Noter.Campaigns
   alias Noter.Jobs
   alias Noter.Sessions
+  alias Noter.Uploads
   import NoterWeb.SessionLive.UploadHelpers
 
   @steps [
@@ -22,10 +23,17 @@ defmodule NoterWeb.SessionLive.New do
 
     if connected?(socket), do: Jobs.subscribe_uploads(campaign.id)
 
+    vocab =
+      case Sessions.list_sessions(campaign.id) do
+        [latest | _] -> Uploads.read_vocab(latest.id)
+        [] -> ""
+      end
+
     {:ok,
      socket
      |> assign(:page_title, "New Session")
      |> assign(:campaign, campaign)
+     |> assign(:vocab, vocab)
      |> assign(:form, to_form(changeset))
      |> assign(:steps, @steps)
      |> assign(:processing?, false)
@@ -35,8 +43,7 @@ defmodule NoterWeb.SessionLive.New do
        max_entries: 1,
        max_file_size: 2_000_000_000,
        chunk_size: 512_000
-     )
-     |> allow_upload(:vocab_file, accept: ~w(.txt), max_entries: 1, max_file_size: 1_000_000)}
+     )}
   end
 
   @impl true
@@ -110,20 +117,17 @@ defmodule NoterWeb.SessionLive.New do
                     </div>
                   </div>
 
-                  <%!-- Vocab Upload --%>
+                  <%!-- Vocab text --%>
                   <div>
-                    <label class="label font-medium">Vocabulary File (TXT)</label>
-                    <div class="flex flex-col gap-2" phx-drop-target={@uploads.vocab_file.ref}>
-                      <.live_file_input
-                        upload={@uploads.vocab_file}
-                        class="file-input file-input-bordered w-full"
-                      />
-                      <.upload_entries
-                        entries={@uploads.vocab_file.entries}
-                        upload_ref={@uploads.vocab_file.ref}
-                        upload={@uploads.vocab_file}
-                      />
-                    </div>
+                    <label class="label font-medium" for="session-vocab">Vocabulary</label>
+                    <textarea
+                      name="vocab"
+                      id="session-vocab"
+                      rows="6"
+                      phx-hook="DropVocab"
+                      placeholder="One term per line. Drop a vocab.txt file here to replace."
+                      class="textarea textarea-bordered w-full font-mono text-sm"
+                    >{@vocab}</textarea>
                   </div>
                 </div>
 
@@ -166,7 +170,7 @@ defmodule NoterWeb.SessionLive.New do
     {:noreply, cancel_upload_by_ref(socket, ref, upload_ref)}
   end
 
-  def handle_event("save", %{"session" => session_params}, socket) do
+  def handle_event("save", %{"session" => session_params} = params, socket) do
     campaign = socket.assigns.campaign
 
     if socket.assigns.uploads.zip_file.entries == [] do
@@ -178,13 +182,12 @@ defmodule NoterWeb.SessionLive.New do
 
       if changeset.valid? do
         zip_paths = consume_uploaded_entries(socket, :zip_file, &consume_to_tmp/2)
-        vocab_paths = consume_uploaded_entries(socket, :vocab_file, &consume_to_tmp/2)
 
         Jobs.start_upload_processing(
           session_params,
           campaign,
           List.first(zip_paths),
-          List.first(vocab_paths)
+          params["vocab"]
         )
 
         {:noreply, assign(socket, processing?: true, processing_status: "Creating session...")}
