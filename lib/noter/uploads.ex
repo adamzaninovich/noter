@@ -24,11 +24,18 @@ defmodule Noter.Uploads do
       Path.join(Application.app_dir(:noter, "priv"), "uploads")
   end
 
+  def read_vocab(session_id) do
+    case File.read(Path.join(session_dir(session_id), "vocab.txt")) do
+      {:ok, content} -> content
+      {:error, _} -> ""
+    end
+  end
+
   def process_uploads(
         session,
         campaign,
         zip_path,
-        vocab_path,
+        vocab_text,
         on_progress \\ fn _ -> :ok end
       ) do
     base_dir = session_dir(session.id)
@@ -40,9 +47,9 @@ defmodule Noter.Uploads do
     File.mkdir_p!(base_dir)
     File.mkdir_p!(extracted_dir)
 
-    if vocab_path do
-      on_progress.("Copying vocabulary file...")
-      move_file!(vocab_path, vocab_dest)
+    if vocab_text && String.trim(vocab_text) != "" do
+      on_progress.("Saving vocabulary...")
+      File.write!(vocab_dest, vocab_text)
     end
 
     on_progress.("Extracting ZIP archive...")
@@ -308,11 +315,6 @@ defmodule Noter.Uploads do
     else
       []
     end
-  end
-
-  defp move_file!(source, dest) do
-    File.cp!(source, dest)
-    File.rm!(source)
   end
 
   defp log_file_op(:ok, _label), do: :ok

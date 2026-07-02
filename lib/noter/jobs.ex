@@ -185,16 +185,16 @@ defmodule Noter.Jobs do
     end
   end
 
-  def start_upload_processing(session_params, campaign, zip_path, vocab_path) do
+  def start_upload_processing(session_params, campaign, zip_path, vocab_text) do
     {:ok, pid} =
       Task.Supervisor.start_child(@supervisor, fn ->
-        run_upload_processing_task(session_params, campaign, zip_path, vocab_path)
+        run_upload_processing_task(session_params, campaign, zip_path, vocab_text)
       end)
 
     {:ok, pid}
   end
 
-  defp run_upload_processing_task(session_params, campaign, zip_path, vocab_path) do
+  defp run_upload_processing_task(session_params, campaign, zip_path, vocab_text) do
     case Sessions.create_session(campaign, session_params) do
       {:ok, session} ->
         Registry.register(@registry, {session.id, :upload}, [])
@@ -207,7 +207,7 @@ defmodule Noter.Jobs do
                session,
                campaign,
                zip_path,
-               vocab_path,
+               vocab_text,
                on_progress
              ) do
           {:ok, _renamed} ->

@@ -54,8 +54,57 @@ defmodule Noter.UploadsTest do
       {:ok, _} =
         :zip.create(~c"#{zip_path}", [{~c"coolgamer.flac", flac_path}], cwd: ~c"#{tmp_dir}")
 
-      vocab_path = Path.join(tmp_dir, "vocab.txt")
-      File.write!(vocab_path, "dragon\nwizard")
+      expect(Noter.SystemCmd.Mock, :cmd, fn "unzip", ["-o", ^zip_path, "-d", _], _opts ->
+        File.mkdir_p!(Path.join(Uploads.session_dir(session.id), "extracted"))
+
+        File.cp!(
+          flac_path,
+          Path.join(Uploads.session_dir(session.id), "extracted/coolgamer.flac")
+        )
+
+        {"", 0}
+      end)
+
+      expect(Noter.SystemCmd.Mock, :cmd, fn "ffmpeg", args, _opts ->
+        output_path = Enum.at(args, -1)
+        File.write!(output_path, "fake wav content")
+        {"", 0}
+      end)
+
+      {:ok, renamed} = Uploads.process_uploads(session, campaign, zip_path, "dragon\nwizard")
+
+      assert renamed == [{"coolgamer", "Thorin"}]
+
+      session_dir = Uploads.session_dir(session.id)
+      assert File.exists?(Path.join(session_dir, "renamed/Thorin.flac"))
+      assert File.exists?(Path.join(session_dir, "merged.wav"))
+      assert File.read!(Path.join(session_dir, "vocab.txt")) == "dragon\nwizard"
+
+      refute File.exists?(zip_path)
+      refute File.dir?(Path.join(session_dir, "extracted"))
+
+      File.rm_rf!(tmp_dir)
+    end
+
+    test "does not write vocab.txt when vocab text is blank", %{
+      campaign: campaign,
+      session: session
+    } do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "noter_upload_test_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+
+      renamed_dir = Path.join(Uploads.session_dir(session.id), "renamed")
+      File.mkdir_p!(renamed_dir)
+
+      flac_path = Path.join(renamed_dir, "coolgamer.flac")
+      File.write!(flac_path, "fake flac content")
+
+      zip_path = Path.join(tmp_dir, "recording.zip")
+
+      {:ok, _} =
+        :zip.create(~c"#{zip_path}", [{~c"coolgamer.flac", flac_path}], cwd: ~c"#{tmp_dir}")
 
       expect(Noter.SystemCmd.Mock, :cmd, fn "unzip", ["-o", ^zip_path, "-d", _], _opts ->
         File.mkdir_p!(Path.join(Uploads.session_dir(session.id), "extracted"))
@@ -74,17 +123,9 @@ defmodule Noter.UploadsTest do
         {"", 0}
       end)
 
-      {:ok, renamed} = Uploads.process_uploads(session, campaign, zip_path, vocab_path)
+      {:ok, _renamed} = Uploads.process_uploads(session, campaign, zip_path, "   ")
 
-      assert renamed == [{"coolgamer", "Thorin"}]
-
-      session_dir = Uploads.session_dir(session.id)
-      assert File.exists?(Path.join(session_dir, "renamed/Thorin.flac"))
-      assert File.exists?(Path.join(session_dir, "merged.wav"))
-      assert File.exists?(Path.join(session_dir, "vocab.txt"))
-
-      refute File.exists?(zip_path)
-      refute File.dir?(Path.join(session_dir, "extracted"))
+      refute File.exists?(Path.join(Uploads.session_dir(session.id), "vocab.txt"))
 
       File.rm_rf!(tmp_dir)
     end
@@ -250,6 +291,19 @@ defmodule Noter.UploadsTest do
 
     test "returns empty list when dir doesn't exist", %{session: session} do
       assert Uploads.list_renamed_files(session.id) == []
+    end
+  end
+
+  describe "read_vocab/1" do
+    test "returns file contents when vocab.txt exists", %{session: session} do
+      File.mkdir_p!(Uploads.session_dir(session.id))
+      File.write!(Path.join(Uploads.session_dir(session.id), "vocab.txt"), "orc\ngoblin")
+
+      assert Uploads.read_vocab(session.id) == "orc\ngoblin"
+    end
+
+    test "returns empty string when vocab.txt is missing", %{session: session} do
+      assert Uploads.read_vocab(session.id) == ""
     end
   end
 end
