@@ -368,4 +368,33 @@ defmodule Noter.SessionsTest do
       refute updated.corrections["replacements"]
     end
   end
+
+  describe "save_chunk_fact/3 and clear_chunk_facts/1" do
+    test "accumulates facts across multiple chunk indices", %{session: session} do
+      :ok = Sessions.save_chunk_fact(session.id, 0, %{"events" => ["a"]})
+      :ok = Sessions.save_chunk_fact(session.id, 2, %{"events" => ["b"]})
+
+      updated = Sessions.get_session!(session.id)
+      assert updated.chunk_facts == %{"0" => %{"events" => ["a"]}, "2" => %{"events" => ["b"]}}
+    end
+
+    test "persists the first fact even when chunk_facts starts NULL", %{session: session} do
+      # Simulate a pre-migration row with a NULL column
+      Session
+      |> Ecto.Query.where(id: ^session.id)
+      |> Repo.update_all(set: [chunk_facts: nil])
+
+      :ok = Sessions.save_chunk_fact(session.id, 0, %{"events" => ["a"]})
+
+      updated = Sessions.get_session!(session.id)
+      assert updated.chunk_facts == %{"0" => %{"events" => ["a"]}}
+    end
+
+    test "clear_chunk_facts resets to an empty map", %{session: session} do
+      :ok = Sessions.save_chunk_fact(session.id, 0, %{"events" => ["a"]})
+
+      {:ok, cleared} = Sessions.clear_chunk_facts(Sessions.get_session!(session.id))
+      assert cleared.chunk_facts == %{}
+    end
+  end
 end

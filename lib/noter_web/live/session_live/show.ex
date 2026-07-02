@@ -465,14 +465,14 @@ defmodule NoterWeb.SessionLive.Show do
                     <.icon name="hero-sparkles" class="size-4" /> Generate Notes
                   </button>
                   <button
-                    :if={@session.chunk_facts != %{} and @session.chunk_facts != nil}
+                    :if={cached_chunk_count(@session) > 0}
                     type="button"
                     id="resume-notes-btn"
                     phx-click="resume_notes"
                     class="btn btn-outline btn-sm"
                   >
                     <.icon name="hero-arrow-path" class="size-4" />
-                    Resume ({map_size(@session.chunk_facts || %{})} chunks cached)
+                    Resume ({cached_chunk_count(@session)} chunks cached)
                   </button>
                   <button
                     :if={@session.session_notes}
@@ -1231,6 +1231,9 @@ defmodule NoterWeb.SessionLive.Show do
     step_idx = Enum.find_index(@status_order, &(&1 == step_status)) || 0
     current_idx >= step_idx
   end
+
+  defp cached_chunk_count(%{chunk_facts: facts}) when is_map(facts), do: map_size(facts)
+  defp cached_chunk_count(_session), do: 0
 
   defp trim_file_label("merged.wav"), do: "Trimming Merged"
   defp trim_file_label(file), do: "Trimming #{Path.basename(file, Path.extname(file))}"

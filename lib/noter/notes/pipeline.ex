@@ -64,14 +64,19 @@ defmodule Noter.Notes.Pipeline do
     concurrency = Settings.get("llm_extraction_concurrency", 4)
     resume = Keyword.get(opts, :resume, false)
 
-    cached =
-      if resume do
-        session.chunk_facts || %{}
-      else
-        Sessions.clear_chunk_facts(session)
-        %{}
-      end
+    case load_cached_facts(session, resume) do
+      {:ok, cached} ->
+        run_extraction(session, chunks, total, context, concurrency, cached, opts, notify_pid)
 
+      {:error, changeset} ->
+        reason = "Failed to clear chunk cache: #{inspect(changeset)}"
+        handle_failure(session_id, reason, notify_pid)
+        {:error, reason}
+    end
+  end
+
+  defp run_extraction(session, chunks, total, context, concurrency, cached, opts, notify_pid) do
+    session_id = session.id
     {cached_results, pending_chunks} = split_cached_chunks(chunks, cached)
 
     cached_indices = Enum.map(cached_results, &elem(&1, 0))
@@ -95,6 +100,18 @@ defmodule Noter.Notes.Pipeline do
       {:error, reason} ->
         handle_failure(session_id, reason, notify_pid)
         {:error, reason}
+    end
+  end
+
+  # On resume, reuse whatever chunks have already been persisted. On a fresh
+  # run, the cache must be cleared first so stale results can't leak in — if
+  # that clear fails, abort rather than merge new facts onto old ones.
+  defp load_cached_facts(session, true), do: {:ok, session.chunk_facts || %{}}
+
+  defp load_cached_facts(session, false) do
+    case Sessions.clear_chunk_facts(session) do
+      {:ok, _session} -> {:ok, %{}}
+      {:error, changeset} -> {:error, changeset}
     end
   end
 
