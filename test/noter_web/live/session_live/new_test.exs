@@ -65,4 +65,17 @@ defmodule NoterWeb.SessionLive.NewTest do
 
     assert html =~ "photo.jpg is not a text file"
   end
+
+  test "reset restores the originally loaded vocab", %{conn: conn, campaign: campaign} do
+    {:ok, prev} = Sessions.create_session(campaign, %{name: "Earlier Session"})
+    File.mkdir_p!(Uploads.session_dir(prev.id))
+    File.write!(Path.join(Uploads.session_dir(prev.id), "vocab.txt"), "Tharivol\nNeverwinter")
+    on_exit(fn -> File.rm_rf(Uploads.session_dir(prev.id)) end)
+
+    {:ok, view, _html} = live(conn, ~p"/campaigns/#{campaign.slug}/sessions/new")
+
+    view |> element("button", "Reset") |> render_click()
+
+    assert_push_event(view, "vocab_reset", %{vocab: "Tharivol\nNeverwinter"})
+  end
 end

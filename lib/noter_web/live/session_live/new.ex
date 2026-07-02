@@ -119,7 +119,17 @@ defmodule NoterWeb.SessionLive.New do
 
                   <%!-- Vocab text --%>
                   <div>
-                    <label class="label font-medium" for="session-vocab">Vocabulary</label>
+                    <div class="flex items-center justify-between">
+                      <label class="label font-medium" for="session-vocab">Vocabulary</label>
+                      <button
+                        type="button"
+                        phx-click="reset_vocab"
+                        class="btn btn-ghost btn-xs gap-1"
+                        title="Restore the vocabulary that was loaded when this form opened"
+                      >
+                        <.icon name="hero-arrow-path" class="size-4" /> Reset
+                      </button>
+                    </div>
                     <textarea
                       name="vocab"
                       id="session-vocab"
@@ -165,6 +175,10 @@ defmodule NoterWeb.SessionLive.New do
       |> Map.put(:action, :validate)
 
     {:noreply, assign(socket, form: to_form(changeset))}
+  end
+
+  def handle_event("reset_vocab", _params, socket) do
+    {:noreply, push_event(socket, "vocab_reset", %{vocab: socket.assigns.vocab})}
   end
 
   def handle_event("vocab_file_rejected", %{"name" => name}, socket) do

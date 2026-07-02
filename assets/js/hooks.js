@@ -40,10 +40,12 @@ export const DropVocab = {
         this.pushEvent("vocab_file_rejected", { name: file.name })
         return
       }
-      file.text().then((text) => {
-        this.el.value = text
-        this.el.dispatchEvent(new Event("input", { bubbles: true }))
-      })
+      file.text().then((text) => this.setValue(text))
     })
+    this.handleEvent("vocab_reset", ({ vocab }) => this.setValue(vocab))
+  },
+  setValue(text) {
+    this.el.value = text
+    this.el.dispatchEvent(new Event("input", { bubbles: true }))
   },
 }
