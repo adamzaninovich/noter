@@ -22,7 +22,7 @@ defmodule Noter.Notes.Prompts do
     Strict rules:
     - Only include facts supported by the chunk text.
     - Do not invent events, outcomes, NPC identities, motives, or locations.
-    - Exclude table talk, hypotheticals, jokes, rules discussion, and planning unless it clearly results in an in-fiction action or a party decision that happens in this chunk.
+    - Capture table talk, jokes, banter, sarcasm, pop-culture references, out-of-character asides, side conversations, hypothetical discussion, rules debate, and planning talk in the `banter` category. Do not include banter content in any other category unless it clearly results in an in-fiction action or party decision.
     - If uncertain, omit rather than guess.
     - Do not include quotes or timestamps in the output.
     - Output must be valid JSON that matches the required schema exactly.

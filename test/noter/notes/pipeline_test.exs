@@ -32,7 +32,8 @@ defmodule Noter.Notes.PipelineTest do
     "decisions" => [],
     "character_moments" => [],
     "loose_threads" => [],
-    "inventory_rewards" => []
+    "inventory_rewards" => [],
+    "banter" => [%{"text" => "Anyone watch the game?"}]
   }
 
   @notes_markdown "# Session Notes\n\n## Summary\nThe party arrived."
@@ -206,6 +207,31 @@ defmodule Noter.Notes.PipelineTest do
       Pipeline.run(session.id, plug: plug)
 
       assert_received {:notes_progress, %{stage: :error, error: _}}
+    end
+
+    test "banter is stripped from facts before reaching the writer" do
+      session = setup_session()
+      setup_llm_settings()
+      test_pid = self()
+
+      plug = fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        decoded = Jason.decode!(body)
+
+        if Map.has_key?(decoded, "response_format") do
+          Req.Test.json(conn, chat_response(Jason.encode!(@valid_facts)))
+        else
+          user_msg = Enum.find(decoded["messages"], &(&1["role"] == "user"))
+          send(test_pid, {:writing_facts, user_msg["content"]})
+          Req.Test.json(conn, chat_response(@notes_markdown))
+        end
+      end
+
+      assert :ok = Pipeline.run(session.id, plug: plug)
+
+      assert_received {:writing_facts, content}
+      refute content =~ "banter"
+      refute content =~ "Anyone watch the game"
     end
 
     test "uses session context in extraction request" do

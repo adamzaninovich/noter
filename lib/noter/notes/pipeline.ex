@@ -74,7 +74,8 @@ defmodule Noter.Notes.Pipeline do
     case extraction_result do
       {:ok, chunk_facts} ->
         aggregated = chunk_facts |> Enum.sort_by(&elem(&1, 0)) |> Aggregator.aggregate()
-        write_and_persist(session, aggregated, context, opts, notify_pid)
+        {_banter, facts_for_writer} = Map.pop(aggregated, "banter", [])
+        write_and_persist(session, facts_for_writer, context, opts, notify_pid)
 
       {:error, reason} ->
         handle_failure(session_id, reason, notify_pid)
