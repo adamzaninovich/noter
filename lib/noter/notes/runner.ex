@@ -57,12 +57,20 @@ defmodule Noter.Notes.Runner do
   end
 
   @impl true
-  def handle_info({:extraction_started, total}, state) do
-    chunks = Enum.map(0..(total - 1), &%{index: &1, status: :pending})
+  def handle_info({:extraction_started, total, cached_indices}, state) do
+    cached_set = MapSet.new(cached_indices)
+
+    chunks =
+      Enum.map(0..(total - 1), fn i ->
+        status = if MapSet.member?(cached_set, i), do: :done, else: :pending
+        %{index: i, status: status}
+      end)
+
+    completed = length(cached_indices)
 
     progress = %{
       stage: :extracting,
-      completed: 0,
+      completed: completed,
       in_progress: 0,
       total: total,
       chunks: chunks

@@ -18,6 +18,7 @@ defmodule Noter.Sessions.Session do
     field :context, :string
     field :session_notes, :string
     field :notes_error, :string
+    field :chunk_facts, :map, default: %{}
 
     belongs_to :campaign, Noter.Campaigns.Campaign
 
@@ -54,7 +55,14 @@ defmodule Noter.Sessions.Session do
 
   def notes_changeset(session, attrs) do
     session
-    |> cast(attrs, [:session_notes, :notes_error, :context, :status, :transcript_srt])
+    |> cast(attrs, [
+      :session_notes,
+      :notes_error,
+      :context,
+      :status,
+      :transcript_srt,
+      :chunk_facts
+    ])
     |> validate_inclusion(:status, @valid_statuses)
   end
 

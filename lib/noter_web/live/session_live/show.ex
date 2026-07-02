@@ -465,6 +465,16 @@ defmodule NoterWeb.SessionLive.Show do
                     <.icon name="hero-sparkles" class="size-4" /> Generate Notes
                   </button>
                   <button
+                    :if={cached_chunk_count(@session) > 0}
+                    type="button"
+                    id="resume-notes-btn"
+                    phx-click="resume_notes"
+                    class="btn btn-outline btn-sm"
+                  >
+                    <.icon name="hero-arrow-path" class="size-4" />
+                    Resume ({cached_chunk_count(@session)} chunks cached)
+                  </button>
+                  <button
                     :if={@session.session_notes}
                     type="button"
                     id="restore-notes-btn"
@@ -1222,6 +1232,9 @@ defmodule NoterWeb.SessionLive.Show do
     current_idx >= step_idx
   end
 
+  defp cached_chunk_count(%{chunk_facts: facts}) when is_map(facts), do: map_size(facts)
+  defp cached_chunk_count(_session), do: 0
+
   defp trim_file_label("merged.wav"), do: "Trimming Merged"
   defp trim_file_label(file), do: "Trimming #{Path.basename(file, Path.extname(file))}"
 
@@ -1559,6 +1572,21 @@ defmodule NoterWeb.SessionLive.Show do
       {:error, changeset} ->
         Logger.error("Failed to save context: #{inspect(changeset)}")
         {:noreply, put_flash(socket, :error, "Failed to save context.")}
+    end
+  end
+
+  def handle_event("resume_notes", _params, socket) do
+    session = socket.assigns.session
+
+    case Jobs.start_notes_generation(session, resume: true) do
+      {:ok, _pid} ->
+        {:noreply,
+         socket
+         |> assign(:active_job, :notes)
+         |> put_flash(:info, "Resuming notes generation...")}
+
+      {:error, :already_running} ->
+        {:noreply, assign(socket, :active_job, :notes)}
     end
   end
 

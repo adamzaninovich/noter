@@ -90,6 +90,22 @@ defmodule Noter.Notes.PipelineTest do
     end
   end
 
+  # Like dual_plug/2 but notifies test_pid whenever an extraction call is made,
+  # so tests can assert whether a chunk was extracted or served from cache.
+  defp tracking_plug(test_pid, extraction_response, writing_response) do
+    fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      decoded = Jason.decode!(body)
+
+      if Map.has_key?(decoded, "response_format") do
+        send(test_pid, :extraction_called)
+        Req.Test.json(conn, chat_response(Jason.encode!(extraction_response)))
+      else
+        Req.Test.json(conn, chat_response(writing_response))
+      end
+    end
+  end
+
   describe "run/2" do
     test "full success: session status transitions to done with notes" do
       session = setup_session()
@@ -206,6 +222,46 @@ defmodule Noter.Notes.PipelineTest do
       Pipeline.run(session.id, plug: plug)
 
       assert_received {:notes_progress, %{stage: :error, error: _}}
+    end
+
+    test "resume: true skips extraction for chunks already cached" do
+      session = setup_session()
+      setup_llm_settings()
+      # Only chunk (index 0) is already cached from a prior partial run
+      Sessions.save_chunk_fact(session.id, 0, @valid_facts)
+      test_pid = self()
+
+      plug = tracking_plug(test_pid, @valid_facts, @notes_markdown)
+
+      assert :ok = Pipeline.run(session.id, resume: true, plug: plug)
+
+      # Cached chunk must not be re-extracted
+      refute_received :extraction_called
+
+      updated = Sessions.get_session!(session.id)
+      assert updated.status == "done"
+      assert updated.session_notes == @notes_markdown
+      # Cache is cleared on successful completion
+      assert updated.chunk_facts == %{}
+    end
+
+    test "resume: false clears existing chunk_facts before extraction" do
+      session = setup_session()
+      setup_llm_settings()
+      # Seed a stale cached result that a fresh run must ignore
+      Sessions.save_chunk_fact(session.id, 0, @valid_facts)
+      test_pid = self()
+
+      plug = tracking_plug(test_pid, @valid_facts, @notes_markdown)
+
+      assert :ok = Pipeline.run(session.id, plug: plug)
+
+      # Cache was cleared, so chunk 0 is re-extracted rather than skipped
+      assert_received :extraction_called
+
+      updated = Sessions.get_session!(session.id)
+      assert updated.status == "done"
+      assert updated.chunk_facts == %{}
     end
 
     test "uses session context in extraction request" do
