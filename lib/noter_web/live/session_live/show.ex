@@ -36,6 +36,9 @@ defmodule NoterWeb.SessionLive.Show do
       |> assign(:page_title, session.name)
       |> assign(:session, session)
       |> assign(:campaign, session.campaign)
+      |> assign(:advanced_open?, false)
+      |> assign(:editing_session_player_map, false)
+      |> assign(:session_player_rows, session_player_map_to_rows(session.player_map))
       |> assign(:renamed_files, renamed_files)
       |> assign(:has_merged_audio?, File.exists?(Path.join(session_dir, "merged.wav")))
       |> assign(:has_vocab?, File.exists?(Path.join(session_dir, "vocab.txt")))
@@ -899,6 +902,143 @@ defmodule NoterWeb.SessionLive.Show do
         <% end %>
 
         <%!-- Danger Zone --%>
+        <%!-- Advanced (collapsible) --%>
+        <div class="collapse collapse-arrow bg-base-200 shadow-sm" id="session-advanced">
+          <input type="checkbox" checked={@advanced_open?} phx-click="toggle_advanced" />
+          <div class="collapse-title font-medium flex items-center gap-2">
+            <.icon name="hero-cog-6-tooth" class="size-5" /> Advanced
+          </div>
+          <div class="collapse-content space-y-6">
+            <div class="card bg-base-100 border border-base-content/5">
+              <div class="card-body p-4">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="card-title text-sm">Player Map</h3>
+                    <p class="text-sm text-base-content/60">
+                      Discord → character names used when (re)processing this session.
+                    </p>
+                  </div>
+                  <button
+                    :if={!@editing_session_player_map}
+                    type="button"
+                    phx-click="edit_session_player_map"
+                    class="btn btn-sm btn-ghost"
+                  >
+                    <.icon name="hero-pencil-square" class="size-4" /> Edit
+                  </button>
+                </div>
+
+                <%= if @editing_session_player_map do %>
+                  <.form
+                    for={%{}}
+                    id="session-player-map-form"
+                    phx-change="update_session_players"
+                    phx-submit="save_session_player_map"
+                  >
+                    <div class="overflow-x-auto rounded-box border border-base-content/5 bg-base-200 mt-2">
+                      <table class="table" id="session-player-map-table">
+                        <thead>
+                          <tr>
+                            <th>Discord Name</th>
+                            <th>Character Name</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr :if={@session_player_rows == []}>
+                            <td colspan="3" class="text-center text-base-content/50 py-6">
+                              No players added yet.
+                            </td>
+                          </tr>
+                          <tr
+                            :for={row <- @session_player_rows}
+                            id={"session-player-row-#{row.id}"}
+                          >
+                            <td>
+                              <input
+                                type="text"
+                                value={row.discord}
+                                name={"player[#{row.id}][discord]"}
+                                placeholder="Discord username"
+                                class="input input-bordered input-sm w-full"
+                                id={"session-player-discord-#{row.id}"}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                value={row.character}
+                                name={"player[#{row.id}][character]"}
+                                placeholder="Character name"
+                                class="input input-bordered input-sm w-full"
+                                id={"session-player-character-#{row.id}"}
+                              />
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                phx-click="remove_session_player"
+                                phx-value-id={row.id}
+                                class="btn btn-ghost btn-sm btn-square text-error"
+                              >
+                                <.icon name="hero-x-mark" class="size-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div class="flex gap-2 mt-2">
+                      <button
+                        type="button"
+                        phx-click="add_session_player"
+                        class="btn btn-sm btn-outline"
+                      >
+                        <.icon name="hero-plus" class="size-4" /> Add Player
+                      </button>
+                      <.button type="submit" class="btn btn-sm btn-primary">Save</.button>
+                      <button
+                        type="button"
+                        phx-click="cancel_edit_session_player_map"
+                        class="btn btn-sm btn-ghost"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </.form>
+                <% else %>
+                  <div
+                    :if={@session.player_map == %{}}
+                    class="text-center py-4 text-base-content/50"
+                  >
+                    No players mapped for this session.
+                  </div>
+                  <div
+                    :if={@session.player_map != %{}}
+                    class="overflow-x-auto rounded-box border border-base-content/5 bg-base-200 mt-2"
+                  >
+                    <table class="table">
+                      <thead>
+                        <tr>
+                          <th>Discord Name</th>
+                          <th>Character Name</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr :for={{discord, character} <- @session.player_map}>
+                          <td class="font-mono">{discord}</td>
+                          <td>{character}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="card bg-base-200 shadow-sm border border-error/20">
           <div class="card-body">
             <h2 class="card-title text-lg text-error">Danger Zone</h2>
@@ -1259,6 +1399,83 @@ defmodule NoterWeb.SessionLive.Show do
   end
 
   @impl true
+  def handle_event("toggle_advanced", _params, socket) do
+    {:noreply, assign(socket, :advanced_open?, !socket.assigns.advanced_open?)}
+  end
+
+  def handle_event("edit_session_player_map", _params, socket) do
+    {:noreply, assign(socket, editing_session_player_map: true, advanced_open?: true)}
+  end
+
+  def handle_event("cancel_edit_session_player_map", _params, socket) do
+    rows = session_player_map_to_rows(socket.assigns.session.player_map)
+
+    {:noreply,
+     socket
+     |> assign(:editing_session_player_map, false)
+     |> assign(:session_player_rows, rows)
+     |> assign(:advanced_open?, true)}
+  end
+
+  def handle_event("update_session_players", %{"player" => player_params}, socket) do
+    rows =
+      Enum.map(socket.assigns.session_player_rows, fn row ->
+        case Map.get(player_params, to_string(row.id)) do
+          %{"discord" => discord, "character" => character} ->
+            %{row | discord: discord, character: character}
+
+          _ ->
+            row
+        end
+      end)
+
+    {:noreply, assign(socket, session_player_rows: rows, advanced_open?: true)}
+  end
+
+  def handle_event("update_session_players", _params, socket) do
+    {:noreply, assign(socket, advanced_open?: true)}
+  end
+
+  def handle_event("add_session_player", _params, socket) do
+    new_row = %{id: System.unique_integer([:positive]), discord: "", character: ""}
+
+    {:noreply,
+     assign(socket,
+       session_player_rows: socket.assigns.session_player_rows ++ [new_row],
+       advanced_open?: true
+     )}
+  end
+
+  def handle_event("remove_session_player", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+    rows = Enum.reject(socket.assigns.session_player_rows, &(&1.id == id))
+    {:noreply, assign(socket, session_player_rows: rows, advanced_open?: true)}
+  end
+
+  def handle_event("save_session_player_map", %{"player" => player_params}, socket) do
+    entries =
+      player_params
+      |> Map.values()
+      |> Enum.reject(fn %{"discord" => d, "character" => c} -> d == "" and c == "" end)
+
+    discord_names = Enum.map(entries, & &1["discord"])
+    duplicates = discord_names -- Enum.uniq(discord_names)
+
+    if duplicates != [] do
+      {:noreply,
+       socket
+       |> put_flash(:error, "Duplicate Discord name: #{Enum.uniq(duplicates) |> Enum.join(", ")}")
+       |> assign(:advanced_open?, true)}
+    else
+      player_map = Map.new(entries, fn %{"discord" => d, "character" => c} -> {d, c} end)
+      persist_session_player_map(socket, player_map)
+    end
+  end
+
+  def handle_event("save_session_player_map", _params, socket) do
+    persist_session_player_map(socket, %{})
+  end
+
   def handle_event("trim_region_updated", %{"start" => start, "end" => end_val}, socket) do
     {:noreply,
      socket
@@ -2071,5 +2288,30 @@ defmodule NoterWeb.SessionLive.Show do
   defp m4a_complete?(session_id) do
     m4a_path = Path.join(Uploads.session_dir(session_id), "trimmed/merged.m4a")
     File.exists?(m4a_path) and not Jobs.running?(session_id, :m4a_encode)
+  end
+
+  defp persist_session_player_map(socket, player_map) do
+    case Sessions.update_session_player_map(socket.assigns.session, player_map) do
+      {:ok, session} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Player map saved.")
+         |> assign(:session, session)
+         |> assign(:session_player_rows, session_player_map_to_rows(session.player_map))
+         |> assign(:editing_session_player_map, false)
+         |> assign(:advanced_open?, true)}
+
+      {:error, _changeset} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to save player map.")
+         |> assign(:advanced_open?, true)}
+    end
+  end
+
+  defp session_player_map_to_rows(player_map) do
+    Enum.map(player_map, fn {discord, character} ->
+      %{id: System.unique_integer([:positive]), discord: discord, character: character}
+    end)
   end
 end
