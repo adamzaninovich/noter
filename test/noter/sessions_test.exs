@@ -368,4 +368,61 @@ defmodule Noter.SessionsTest do
       refute updated.corrections["replacements"]
     end
   end
+
+  describe "player_map_changeset/2" do
+    test "casts player_map" do
+      changeset =
+        Session.player_map_changeset(%Session{}, %{
+          "player_map" => %{"alice" => "Thorin"}
+        })
+
+      assert changeset.valid?
+      assert Ecto.Changeset.get_change(changeset, :player_map) == %{"alice" => "Thorin"}
+    end
+  end
+
+  describe "create_session/2 player_map inheritance" do
+    setup do
+      {:ok, campaign} =
+        Campaigns.create_campaign(%{
+          "name" => "Camp #{System.unique_integer([:positive])}",
+          "player_map" => %{"alice" => "Thorin"}
+        })
+
+      %{seed_campaign: campaign}
+    end
+
+    test "first session inherits from campaign seed", %{seed_campaign: campaign} do
+      {:ok, session} = Sessions.create_session(campaign, %{"name" => "S1"})
+      assert session.player_map == %{"alice" => "Thorin"}
+    end
+
+    test "later session inherits from the most recent prior session", %{seed_campaign: campaign} do
+      {:ok, s1} = Sessions.create_session(campaign, %{"name" => "S1"})
+      {:ok, s1} = Sessions.update_session_player_map(s1, %{"alice" => "Gandalf"})
+      assert s1.player_map == %{"alice" => "Gandalf"}
+
+      {:ok, s2} = Sessions.create_session(campaign, %{"name" => "S2"})
+      assert s2.player_map == %{"alice" => "Gandalf"}
+    end
+
+    test "editing a prior session does not change an already-created later session",
+         %{seed_campaign: campaign} do
+      {:ok, s1} = Sessions.create_session(campaign, %{"name" => "S1"})
+      {:ok, s2} = Sessions.create_session(campaign, %{"name" => "S2"})
+
+      {:ok, _s1} = Sessions.update_session_player_map(s1, %{"alice" => "Gandalf"})
+
+      reloaded = Sessions.get_session!(s2.id)
+      assert reloaded.player_map == %{"alice" => "Thorin"}
+    end
+
+    test "first session with empty campaign seed gets empty map" do
+      {:ok, campaign} =
+        Campaigns.create_campaign(%{"name" => "Empty #{System.unique_integer([:positive])}"})
+
+      {:ok, session} = Sessions.create_session(campaign, %{"name" => "S1"})
+      assert session.player_map == %{}
+    end
+  end
 end

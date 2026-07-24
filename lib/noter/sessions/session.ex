@@ -18,6 +18,7 @@ defmodule Noter.Sessions.Session do
     field :context, :string
     field :session_notes, :string
     field :notes_error, :string
+    field :player_map, :map, default: %{}
 
     belongs_to :campaign, Noter.Campaigns.Campaign
 
@@ -56,6 +57,10 @@ defmodule Noter.Sessions.Session do
     session
     |> cast(attrs, [:session_notes, :notes_error, :context, :status, :transcript_srt])
     |> validate_inclusion(:status, @valid_statuses)
+  end
+
+  def player_map_changeset(session, attrs) do
+    cast(session, attrs, [:player_map])
   end
 
   def corrections(%__MODULE__{corrections: c}), do: c || %{}
