@@ -33,7 +33,7 @@ defmodule Noter.Uploads do
 
   def process_uploads(
         session,
-        campaign,
+        _campaign,
         zip_path,
         vocab_text,
         on_progress \\ fn _ -> :ok end
@@ -56,7 +56,7 @@ defmodule Noter.Uploads do
 
     with :ok <- Prep.extract_zip(zip_path, extracted_dir) do
       on_progress.("Renaming tracks...")
-      {:ok, renamed} = Prep.rename_flacs(extracted_dir, renamed_dir, campaign.player_map)
+      {:ok, renamed} = Prep.rename_flacs(extracted_dir, renamed_dir, session.player_map)
 
       on_progress.("Mixing and normalizing audio...")
 
@@ -160,7 +160,7 @@ defmodule Noter.Uploads do
     flac_jobs =
       Enum.map(flac_files, fn path ->
         basename = Path.basename(path, ".flac")
-        character_name = Prep.resolve_character(basename, session.campaign.player_map)
+        character_name = Prep.resolve_character(basename, session.player_map)
         output_path = Path.join(trimmed_dir, "#{character_name}.flac")
         {"#{character_name}.flac", path, output_path}
       end)
