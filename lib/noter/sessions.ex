@@ -61,10 +61,31 @@ defmodule Noter.Sessions do
   end
 
   def create_session(%Noter.Campaigns.Campaign{} = campaign, attrs) do
-    %Session{campaign_id: campaign.id}
+    %Session{campaign_id: campaign.id, player_map: seed_player_map(campaign)}
     |> Session.changeset(attrs)
     |> Repo.insert()
     |> broadcast_session_created()
+  end
+
+  defp seed_player_map(%Noter.Campaigns.Campaign{} = campaign) do
+    case latest_session(campaign.id) do
+      %Session{player_map: pm} -> pm || %{}
+      nil -> campaign.player_map || %{}
+    end
+  end
+
+  defp latest_session(campaign_id) do
+    Session
+    |> where([s], s.campaign_id == ^campaign_id)
+    |> order_by([s], desc: s.inserted_at, desc: s.id)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  def update_session_player_map(%Session{} = session, player_map) do
+    session
+    |> Session.player_map_changeset(%{player_map: player_map})
+    |> Repo.update()
   end
 
   def update_session(%Session{} = session, attrs) do
