@@ -54,7 +54,7 @@ defmodule NoterWeb.SessionLive.ReviewState do
         |> stamp_editing_state()
 
       speakers = raw_turns |> Enum.map(& &1.speaker) |> Enum.uniq()
-      speaker_colors = build_speaker_colors(speakers, socket.assigns.campaign)
+      speaker_colors = build_speaker_colors(speakers, session)
 
       done_stats =
         if session.status in ~w(noting done) do
@@ -168,9 +168,9 @@ defmodule NoterWeb.SessionLive.ReviewState do
     }
   end
 
-  def build_speaker_colors(speakers, campaign) do
+  def build_speaker_colors(speakers, %Noter.Sessions.Session{} = session) do
     all_characters =
-      campaign.player_map
+      session.player_map
       |> Map.values()
       |> Enum.sort()
 

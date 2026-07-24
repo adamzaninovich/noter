@@ -75,4 +75,40 @@ defmodule NoterWeb.SessionLive.ShowTest do
     assert has_element?(view, "#renamed-files-table")
     assert has_element?(view, "td", "Thorin")
   end
+
+  describe "session player map editor" do
+    test "renders the advanced player map panel", %{
+      conn: conn,
+      campaign: campaign,
+      session: session
+    } do
+      {:ok, view, _html} =
+        live(conn, ~p"/campaigns/#{campaign.slug}/sessions/#{session.slug}")
+
+      assert has_element?(view, "#session-advanced")
+    end
+
+    test "saving updates the session player_map", %{
+      conn: conn,
+      campaign: campaign,
+      session: session
+    } do
+      {:ok, view, _html} =
+        live(conn, ~p"/campaigns/#{campaign.slug}/sessions/#{session.slug}")
+
+      view |> element("button[phx-click='edit_session_player_map']") |> render_click()
+
+      html = view |> element("#session-player-map-form") |> render()
+      [_, row_id] = Regex.run(~r/session-player-row-(\d+)/, html)
+
+      view
+      |> form("#session-player-map-form", %{
+        "player" => %{row_id => %{"discord" => "user1", "character" => "Gandalf"}}
+      })
+      |> render_submit()
+
+      reloaded = Sessions.get_session!(session.id)
+      assert reloaded.player_map == %{"user1" => "Gandalf"}
+    end
+  end
 end

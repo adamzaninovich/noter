@@ -103,14 +103,17 @@ defmodule NoterWeb.CampaignLive.Show do
                   <div>
                     <h3 class="card-title text-sm">Player Map</h3>
                     <p class="text-sm text-base-content/60">
-                      Map Discord usernames to character names for transcript processing.
+                      Starting roster for this campaign. Editable until the first session is created; each session then keeps its own copy.
                     </p>
                   </div>
-                  <%= if !@editing_player_map do %>
-                    <button type="button" phx-click="edit_player_map" class="btn btn-sm btn-ghost">
-                      <.icon name="hero-pencil-square" class="size-4" /> Edit
-                    </button>
-                  <% end %>
+                  <button
+                    :if={!@editing_player_map and @sessions_empty?}
+                    type="button"
+                    phx-click="edit_player_map"
+                    class="btn btn-sm btn-ghost"
+                  >
+                    <.icon name="hero-pencil-square" class="size-4" /> Edit
+                  </button>
                 </div>
 
                 <%= if @editing_player_map do %>
